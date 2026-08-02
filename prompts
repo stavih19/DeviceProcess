@@ -1,0 +1,117 @@
+# Setup:
+Set up the initial code to read files from a directory provided as a parameter when running `main.py`.
+This refers to the code that:
+Runs the algorithm (simply calling the function is sufficient—no actual implementation needed at this stage) and then outputs an object containing all the required outputs specified in the problem description.
+We also have the label for the image showing the two vehicles.
+Store only the filename in the object, and save all output files in a directory separate from the input files.
+
+
+# Step 1:
+Create the first stage of the Pivot-detection algorithm in Python.
+The input is a two-dimensional NumPy height map in which every array value represents the measured height at an X-Y location.
+Implement a function that finds and ranks candidates for the lower flat plane of the Pivot.
+
+Requirements:
+1. Validate that the input is a two-dimensional numeric NumPy array and that it does not contain NaN or infinite values.
+2. Apply light Gaussian smoothing to reduce small measurement noise.
+3. Detect relatively high regions using a threshold derived from the data, such as a configurable percentile. Do not use a fixed absolute height threshold.
+4. Apply morphological opening to remove isolated noise and morphological closing to connect small gaps.
+5. Fill holes inside detected regions because the cross may appear as a hole or local height difference inside the lower plane.
+6. Run connected-component labeling on the resulting binary mask.
+7. For every connected component, calculate:
+   - Component label.
+   - Bounding box.
+   - Four bounding-box corner points.
+   - Width and height.
+   - Centroid coordinates.
+   - Area in pixels.
+   - Rectangularity, defined as component area divided by bounding-box area.
+   - Width-to-height ratio.
+   - Median height.
+   - Median absolute deviation of the height values.
+   - Whether the component touches an image border.
+8. Filter unsuitable components according to configurable conditions:
+   - Minimum and maximum area.
+   - Minimum rectangularity.
+   - Expected width-to-height ratio.
+   - Optional rejection of components that touch the image border.
+9. Calculate a score for every remaining candidate. The score should combine:
+   - Rectangularity.
+   - Horizontal aspect ratio.
+   - Flatness based on the height median absolute deviation.
+10. Sort the candidates from highest to lowest score and select the highest-scoring candidate as the best lower-plane candidate.
+11. Return a structured result object containing:
+   - The threshold used.
+   - The processed binary mask.
+   - The connected-component label image.
+   - The complete ranked candidate list.
+   - Access to the best candidate.
+   - A method for retrieving the exact binary mask of a selected candidate.
+
+12. Print the selected candidate and all of its measurements.
+13. After selecting the best candidate, print every candidate in descending score order. For every candidate, print:
+   - Rank.
+   - Component label.
+   - Score.
+   - Bounding box.
+   - Size.
+   - Centroid.
+   - Area.
+   - Rectangularity.
+   - Width-to-height ratio.
+   - Median height.
+   - Height median absolute deviation.
+14. Open a Matplotlib plot after printing the candidates:
+   - Display the original height map using a suitable colormap.
+   - Draw the bounding box of every candidate.
+   - Add the rank and score next to every bounding box.
+   - Highlight the selected candidate with a thicker red bounding box.
+   - Mark the selected candidate’s centroid.
+   - Include a color bar and axis labels.
+15. Use dataclasses for the bounding box, candidate information, configuration and detection result.
+16. Keep all thresholds and filtering parameters configurable.
+17. Do not use hardcoded coordinates or assume that the channel is centered.
+18. Do not implement the complete Pivot segmentation yet. This stage should only detect candidates for the lower flat plane.
+19. Do not assign the final Pivot label to the selected candidate because it represents only one internal part of the Pivot.
+20. Keep the code clean, typed, documented and separated into reusable functions.
+
+# Step 2
+Implement Stage 2 of the Pivot-detection pipeline in Python: detect the lower cross inside the selected lower-plane candidate.
+Use the original height map and the `LowerPlaneDetectionResult` from Stage 1. Crop the selected lower-plane region, exclude a small boundary band, and detect the cross as a local height depression relative to the surrounding flat plane.
+Use Difference of Gaussians, a robust threshold based on median and MAD, morphological cleanup and connected components.
+For each candidate, calculate its center, bounding box, area, shape similarity to a plus sign, distance from the lower-plane center and local height contrast. Rank all candidates and select the highest-scoring one.
+Return a structured result containing all candidates, the selected cross center in the original image coordinates, masks and debug data. Print all candidate scores and display a debug plot showing the selected cross.
+
+# Step 3
+Implement Stage 3 of the Pivot-detection pipeline in Python: detect and label the complete Pivot.
+Use the lower-plane and lower-cross detections from the previous stages as anchors. Estimate a local Pivot-body reference height, calculate image gradients, and detect the left, right, top and bottom Pivot boundaries from strong height transitions.
+Do not assume a fixed Pivot size or a centered channel. Rank boundary candidates using gradient strength, height difference, expected inside height and distance from the lower-plane anchor.
+Return a structured result containing:
+- The Pivot bounding box.
+- A boolean Pivot mask with the same shape as the input.
+- The four selected boundaries and their scores.
+- An overall confidence score.
+Print the detected boundaries and display a debug plot showing the Pivot bounding box, lower-plane box, lower-cross center and final Pivot label mask.
+
+Additionally, do not select the four Pivot boundaries independently.
+Keep several candidates for the left, right, top and bottom boundaries, and evaluate combinations of four boundaries together.
+For every combination, verify that:
+- The estimated height immediately inside all four boundaries is approximately consistent.
+- The estimated height immediately outside all four boundaries is approximately consistent.
+- The height step across all four boundaries is approximately consistent.
+Use configurable tolerances rather than exact equality because the height map may contain noise.
+Include the boundary-consistency score in the final confidence score. Return the inside-height reference, outside-height reference, reference height step, consistency deviations and a boolean indicating whether the four boundaries are consistent.
+Reject or mark as low confidence any Pivot bounding box whose four boundaries do not show consistent height transitions.
+
+# Step 4
+Implement Stage 4: detect the upper Pivot cross.
+Search only inside the Pivot segmentation mask and above the detected lower plane. Reuse the shared cross-detection logic already used for the lower cross: Difference of Gaussians, Median/MAD thresholding, morphology, connected components and plus-shape scoring.
+Rank candidates using:
+- Cross-shape score.
+- Horizontal alignment with the lower cross.
+- Expected position in the upper Pivot region.
+- Size similarity to the lower cross.
+- Local depression contrast.
+Return the selected upper-cross center, bounding box, mask, candidate scores and confidence, and include a debug visualization. Do not duplicate the common cross-detection implementation.
+
+# Step 5
