@@ -33,6 +33,12 @@ from AlgoSteps.pivot_plane_height_difference import (
     plot_pivot_plane_height_measurements,
     print_pivot_plane_height_difference,
 )
+from AlgoSteps.xpander_segmentation_v4 import (
+    XpanderSegmentationResult,
+    plot_xpander_segmentation,
+    print_xpander_segmentation,
+    segment_xpander,
+)
 
 
 def analyze_height_map(
@@ -55,7 +61,7 @@ def analyze_height_map(
     # Stage 1: detect the lower Pivot plane.
     lower_plane_detection = get_lower_plane_detection(
         height_map=height_map,
-        show_debug=False,
+        show_debug=True,
     )
 
     # Stage 2: detect the lower cross inside the selected plane.
@@ -98,6 +104,13 @@ def analyze_height_map(
         lower_cross_detection=lower_cross_detection,
         pivot_segmentation=pivot_segmentation,
         upper_cross_detection=upper_cross_detection,
+        show_debug=False,
+    )
+
+    # Stage 6: detect and label the Xpander.
+    xpander_segmentation = get_xpander_segmentation(
+        height_map=height_map,
+        pivot_segmentation=pivot_segmentation,
         show_debug=True,
     )
 
@@ -106,7 +119,12 @@ def analyze_height_map(
         height_map.shape,
         dtype=np.uint8,
     )
-    final_label_map[pivot_segmentation.pivot_mask] = 1
+    final_label_map[
+        pivot_segmentation.pivot_mask
+    ] = 1
+    # final_label_map[
+    #     xpander_segmentation.xpander_mask
+    # ] = 2
 
     return RawAnalysisResult(
         status="not_implemented",
@@ -388,3 +406,30 @@ def get_pivot_plane_height_difference(
         )
 
     return measurement_result
+
+
+def get_xpander_segmentation(
+    height_map: np.ndarray,
+    pivot_segmentation: PivotSegmentationResult,
+    show_debug: bool = False,
+) -> XpanderSegmentationResult:
+    """
+    Detect and label the Xpander and optionally display the detection graph.
+    """
+    segmentation_result = segment_xpander(
+        height_map=height_map,
+        pivot_segmentation=pivot_segmentation,
+    )
+
+    print_xpander_segmentation(
+        segmentation_result
+    )
+
+    if show_debug:
+        plot_xpander_segmentation(
+            height_map=height_map,
+            pivot_segmentation=pivot_segmentation,
+            result=segmentation_result,
+        )
+
+    return segmentation_result

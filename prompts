@@ -115,3 +115,33 @@ Rank candidates using:
 Return the selected upper-cross center, bounding box, mask, candidate scores and confidence, and include a debug visualization. Do not duplicate the common cross-detection implementation.
 
 # Step 5
+Implement Stage 5: calculate the height difference between the two flat Pivot surfaces.
+For both the upper and lower cross, start from the detected cross bounding box and expand it horizontally by half of the cross width on each side, without vertical expansion. Exclude the complete cross bounding box plus a small horizontal safety margin to avoid the cross slopes and halo.
+Measure the surface height only from the remaining left and right strips, intersected with the relevant surface mask. Use all included pixels without outlier filtering.
+Calculate:
+- Mean height of each strip.
+- Mean height of each surface.
+- Plane 2 − Plane 1 height difference.
+Return the measurement masks, bounding boxes, pixel counts, surface heights and final difference. Add a debug plot showing the two measured rectangles on each surface using a shared color scale.
+
+# Step 6
+Implement Stage 6: detect and label the Xpander.
+Use the detected Pivot boundaries as geometric anchors. From the left Pivot side, move left and then upward to a left reference corner; from the right Pivot side, move right and then upward to a right reference corner. When locating these reference corners, group nearby gradient edges and cross the complete shadow/halo surrounding the components rather than selecting its first edge.
+From each reference corner, continue horizontally outward in the same direction:
+* From the left reference corner, continue left.
+* From the right reference corner, continue right.
+After crossing the halo, find a stable Xpander surface followed by a raised separator and then either a neighboring component or background. Use the Xpander-facing edge of the separator as the corresponding bottom Xpander corner.
+From both bottom corners, search upward for the upper Xpander boundary. Detect the pattern:
+* Stable Xpander surface.
+* A small rise, which defines the upper Xpander bounding-box boundary.
+* A larger fall toward the separator.
+A following recovery rise is optional and should strengthen the confidence score when present, but must not be required.
+Return a structured result containing:
+* The four Xpander corners.
+* The Xpander bounding box.
+* A boolean Xpander mask.
+* The two reference corners.
+* Horizontal and vertical search profiles.
+* Detected transitions and their scores.
+* Overall confidence and a low-confidence flag.
+Print the detected geometry and display a debug plot showing the Pivot anchor, reference corners, search paths, four Xpander corners, bounding box and final Xpander mask. Keep all thresholds, halo handling, search distances and line widths configurable, and do not use hardcoded coordinates.
