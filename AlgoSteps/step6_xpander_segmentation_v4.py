@@ -12,19 +12,19 @@ from scipy import ndimage as ndi
 from scipy.signal import find_peaks
 
 try:
-    from AlgoSteps.pivot_candidates import (
+    from AlgoSteps.step1_pivot_candidates import (
         BoolArray,
         BoundingBox,
         FloatArray,
     )
-    from AlgoSteps.pivot_segmentation import PivotSegmentationResult
+    from AlgoSteps.step3_pivot_segmentation import PivotSegmentationResult
 except ImportError:
-    from pivot_candidates import (
+    from AlgoSteps.step1_pivot_candidates import (
         BoolArray,
         BoundingBox,
         FloatArray,
     )
-    from pivot_segmentation import PivotSegmentationResult
+    from AlgoSteps.step3_pivot_segmentation import PivotSegmentationResult
 
 
 SideName = Literal["left", "right"]
@@ -1954,6 +1954,31 @@ def plot_xpander_segmentation(
 
     figure.tight_layout()
     plt.show()
+
+
+def get_xpander_segmentation(
+    height_map: FloatArray,
+    pivot_segmentation: PivotSegmentationResult,
+    print_debug: bool = False,
+    show_debug: bool = False,
+) -> XpanderSegmentationResult:
+    """Run Step 6 and optionally print or display its diagnostics."""
+    segmentation_result = segment_xpander(
+        height_map=height_map,
+        pivot_segmentation=pivot_segmentation,
+    )
+
+    if print_debug:
+        print_xpander_segmentation(segmentation_result)
+
+    if show_debug:
+        plot_xpander_segmentation(
+            height_map=height_map,
+            pivot_segmentation=pivot_segmentation,
+            result=segmentation_result,
+        )
+
+    return segmentation_result
 
 
 def _plot_profile(

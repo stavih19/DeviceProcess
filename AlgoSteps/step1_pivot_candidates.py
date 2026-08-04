@@ -569,3 +569,26 @@ def plot_lower_plane_candidates(
 
     figure.tight_layout()
     plt.show()
+
+
+def get_lower_plane_detection(
+    height_map: FloatArray,
+    print_debug: bool = False,
+    show_debug: bool = False,
+) -> LowerPlaneDetectionResult:
+    """Detect the lower Pivot plane and optionally display its debug plot."""
+    detection_result = find_lower_plane_candidates(height_map)
+
+    if detection_result.best_candidate is None:
+        raise ValueError("No lower Pivot plane candidate was found.")
+
+    if print_debug:
+        print_lower_plane_candidates(detection_result)
+
+    if show_debug:
+        plot_lower_plane_candidates(
+            height_map=height_map,
+            detection_result=detection_result,
+        )
+
+    return detection_result

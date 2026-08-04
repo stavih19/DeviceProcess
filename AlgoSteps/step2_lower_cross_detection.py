@@ -910,7 +910,7 @@ from matplotlib.patches import Rectangle
 from numpy.typing import NDArray
 from scipy import ndimage as ndi
 
-from AlgoSteps.pivot_candidates import (
+from AlgoSteps.step1_pivot_candidates import (
     BoolArray,
     BoundingBox,
     FloatArray,
@@ -1507,6 +1507,40 @@ def plot_lower_cross_detection(
     )
     figure.tight_layout()
     plt.show()
+
+
+def get_lower_cross_detection(
+    height_map: FloatArray,
+    lower_plane_detection: LowerPlaneDetectionResult,
+    print_debug: bool = False,
+    show_debug: bool = False,
+) -> LowerCrossDetectionResult:
+    """Detect the lower Pivot cross and optionally display its debug plot."""
+    best_plane = lower_plane_detection.best_candidate
+    if best_plane is None:
+        raise ValueError(
+            "Lower-cross detection requires a valid lower-plane candidate."
+        )
+
+    detection_result = find_lower_cross_candidates(
+        height_map=height_map,
+        lower_plane_detection=lower_plane_detection,
+        lower_plane_candidate=best_plane,
+    )
+
+    if detection_result.best_candidate is None:
+        raise ValueError("No lower Pivot cross candidate was found.")
+
+    if print_debug:
+        print_lower_cross_candidates(detection_result)
+
+    if show_debug:
+        plot_lower_cross_detection(
+            height_map=height_map,
+            detection_result=detection_result,
+        )
+
+    return detection_result
 
 
 def _create_cross_search_mask(

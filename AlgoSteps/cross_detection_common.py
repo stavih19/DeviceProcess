@@ -6,7 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import ndimage as ndi
 
-from AlgoSteps.pivot_candidates import (
+from AlgoSteps.step1_pivot_candidates import (
     BoolArray,
     BoundingBox,
     FloatArray,

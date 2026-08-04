@@ -9,8 +9,8 @@ from numpy.typing import NDArray
 from scipy import ndimage as ndi
 from scipy.signal import find_peaks
 
-from AlgoSteps.lower_cross_detection import LowerCrossDetectionResult
-from AlgoSteps.pivot_candidates import (
+from AlgoSteps.step2_lower_cross_detection import LowerCrossDetectionResult
+from AlgoSteps.step1_pivot_candidates import (
     BoolArray,
     BoundingBox,
     FloatArray,
@@ -672,6 +672,34 @@ def plot_pivot_segmentation(
     )
     figure.tight_layout()
     plt.show()
+
+
+def get_pivot_segmentation(
+    height_map: FloatArray,
+    lower_plane_detection: LowerPlaneDetectionResult,
+    lower_cross_detection: LowerCrossDetectionResult,
+    print_debug: bool = False,
+    show_debug: bool = False,
+) -> PivotSegmentationResult:
+    """Segment the Pivot and optionally display its debug plot."""
+    segmentation_result = segment_pivot(
+        height_map=height_map,
+        lower_plane_detection=lower_plane_detection,
+        lower_cross_detection=lower_cross_detection,
+    )
+
+    if print_debug:
+        print_pivot_segmentation(segmentation_result)
+
+    if show_debug:
+        plot_pivot_segmentation(
+            height_map=height_map,
+            result=segmentation_result,
+            lower_plane_detection=lower_plane_detection,
+            lower_cross_detection=lower_cross_detection,
+        )
+
+    return segmentation_result
 
 
 def _create_reference_box(

@@ -145,3 +145,17 @@ Return a structured result containing:
 * Detected transitions and their scores.
 * Overall confidence and a low-confidence flag.
 Print the detected geometry and display a debug plot showing the Pivot anchor, reference corners, search paths, four Xpander corners, bounding box and final Xpander mask. Keep all thresholds, halo handling, search distances and line widths configurable, and do not use hardcoded coordinates.
+
+# Step 7
+Implement Stage 7: calculate the Xpander radius of curvature in both the X and Y axes.
+Use the Xpander segmentation from Stage 6 and measure the curvature around the center of the detected Xpander. For the X-axis radius, extract several parallel X–Z profiles from central rows. For the Y-axis radius, extract several parallel Y–Z profiles from central columns.
+Convert lateral coordinates using a pixel pitch of 0.252 μm and treat the height-map values as Z values already expressed in μm. Exclude pixels near the Xpander boundaries, separators and halo.
+Fit a circle robustly to every valid profile, reject poor fits and radius outliers, and calculate the final X and Y radii from the median of the accepted profile results.
+Return a structured result containing:
+Radius in the X axis in μm.
+Radius in the Y axis in μm.
+Per-profile fit results.
+Fit errors and quality scores.
+Accepted and rejected profiles.
+Overall confidence and a low-confidence flag.
+Print the final radii and fit-quality measurements. Display a debug plot showing the selected central profiles, the X–Z and Y–Z height profiles, and the fitted circular arcs.

@@ -1,435 +1,361 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 
-from AlgoSteps.lower_cross_detection import (
-    LowerCrossDetectionResult,
-    find_lower_cross_candidates,
-    plot_lower_cross_detection,
-    print_lower_cross_candidates,
+from AlgoSteps.step2_lower_cross_detection import (
+    get_lower_cross_detection,
+)
+from AlgoSteps.step1_pivot_candidates import (
+    get_lower_plane_detection,
+)
+from AlgoSteps.step5_pivot_plane_height_difference import (
+    get_pivot_plane_height_difference,
+)
+from AlgoSteps.step3_pivot_segmentation import (
+    get_pivot_segmentation,
+)
+from AlgoSteps.step4_upper_cross_detection import (
+    get_upper_cross_detection,
+)
+from AlgoSteps.step7_xpander_curvature import (
+    get_xpander_curvature,
+)
+from AlgoSteps.step6_xpander_segmentation_v4 import (
+    get_xpander_segmentation,
+)
+from analysis_summary_plot_partial import (
+    plot_analysis_summary,
 )
 from models import Point2D, RawAnalysisResult
-from AlgoSteps.pivot_candidates import (
-    LowerPlaneDetectionResult,
-    find_lower_plane_candidates,
-    plot_lower_plane_candidates,
-    print_lower_plane_candidates,
-)
-from AlgoSteps.pivot_segmentation import (
-    PivotSegmentationResult,
-    plot_pivot_segmentation,
-    print_pivot_segmentation,
-    segment_pivot,
-)
-from AlgoSteps.upper_cross_detection import (
-    UpperCrossDetectionResult,
-    find_upper_cross_candidates,
-    plot_upper_cross_detection,
-    print_upper_cross_candidates,
-)
-from AlgoSteps.pivot_plane_height_difference import (
-    PivotPlaneHeightDifferenceResult,
-    measure_pivot_plane_height_difference,
-    plot_pivot_plane_height_measurements,
-    print_pivot_plane_height_difference,
-)
-from AlgoSteps.xpander_segmentation_v4 import (
-    XpanderSegmentationResult,
-    plot_xpander_segmentation,
-    print_xpander_segmentation,
-    segment_xpander,
-)
 
 
 def analyze_height_map(
     height_map: np.ndarray,
     pixel_size_um: float,
+    input_file_name: str | None = None,
+    print_debug: bool = False,
+    show_debug: bool = False,
+    summary_plot: bool = False,
+    summary_output_path: str | Path | None = None,
+    show_summary_on_failure: bool = True,
+    raise_on_failure: bool = False,
 ) -> RawAnalysisResult:
     """
-    Analyze one 2D height map.
+    Run the seven analysis stages sequentially.
 
-    Current implementation:
-    1. Detect lower-plane candidates.
-    2. Select the best lower-plane candidate.
-    3. Detect lower-cross candidates inside that plane.
-    4. Select the best lower-cross candidate.
-
-    The complete Pivot and Xpander segmentation is not implemented yet.
+    If a stage fails:
+    - later stages are not executed;
+    - all successful earlier results are retained;
+    - a partial summary plot can still be displayed or saved;
+    - a partial RawAnalysisResult is returned;
+    - the original exception is re-raised only when raise_on_failure=True.
     """
-    del pixel_size_um  # Will be used in later measurement stages.
+    del pixel_size_um  # Stage 7 currently uses the assignment's 0.252 μm pitch.
 
-    # Stage 1: detect the lower Pivot plane.
-    lower_plane_detection = get_lower_plane_detection(
-        height_map=height_map,
-        show_debug=True,
-    )
+    lower_plane_detection: Any | None = None
+    lower_cross_detection: Any | None = None
+    pivot_segmentation: Any | None = None
+    upper_cross_detection: Any | None = None
+    pivot_height_result: Any | None = None
+    xpander_segmentation: Any | None = None
+    xpander_curvature: Any | None = None
 
-    # Stage 2: detect the lower cross inside the selected plane.
-    lower_cross_detection = get_lower_cross_detection(
-        height_map=height_map,
-        lower_plane_detection=lower_plane_detection,
-        show_debug=False,
-    )
-    best_cross = lower_cross_detection.best_candidate
-    cross_centers: list[Point2D] = []
-    if best_cross is not None:
-        cross_centers.append(
-            Point2D(
-                x=best_cross.center_x,
-                y=best_cross.center_y,
-            )
+    completed_stages: list[str] = []
+    failed_stage: str | None = None
+    failure_message: str | None = None
+    caught_error: Exception | None = None
+
+    # Seven-stage analysis summary:
+    # 1. Detect the lower Pivot plane.
+    # 2. Detect the lower cross inside the selected plane.
+    # 3. Label the complete Pivot.
+    # 4. Detect the upper Pivot cross.
+    # 5. Measure the height difference between the two Pivot surfaces.
+    # 6. Detect and label the Xpander.
+    # 7. Measure the Xpander radius of curvature.
+
+    try:
+        # Stage 1: detect the lower Pivot plane.
+        current_stage = "Stage 1 — lower Pivot plane"
+        lower_plane_detection = get_lower_plane_detection(
+            height_map=height_map,
+            print_debug=print_debug,
+            show_debug=show_debug,
+        )
+        completed_stages.append(current_stage)
+
+        # Stage 2: detect the lower cross inside the selected plane.
+        current_stage = "Stage 2 — lower Pivot cross"
+        lower_cross_detection = get_lower_cross_detection(
+            height_map=height_map,
+            lower_plane_detection=lower_plane_detection,
+            print_debug=print_debug,
+            show_debug=show_debug,
+        )
+        completed_stages.append(current_stage)
+
+        # Stage 3: label the complete Pivot.
+        current_stage = "Stage 3 — complete Pivot segmentation"
+        pivot_segmentation = get_pivot_segmentation(
+            height_map=height_map,
+            lower_plane_detection=lower_plane_detection,
+            lower_cross_detection=lower_cross_detection,
+            print_debug=print_debug,
+            show_debug=show_debug,
+        )
+        completed_stages.append(current_stage)
+
+        # Stage 4: detect the upper Pivot cross.
+        current_stage = "Stage 4 — upper Pivot cross"
+        upper_cross_detection = get_upper_cross_detection(
+            height_map=height_map,
+            pivot_segmentation=pivot_segmentation,
+            lower_plane_detection=lower_plane_detection,
+            lower_cross_detection=lower_cross_detection,
+            print_debug=print_debug,
+            show_debug=show_debug,
         )
 
-    # Stage 3: label the complete Pivot.
-    pivot_segmentation = get_pivot_segmentation(
-        height_map=height_map,
-        lower_plane_detection=lower_plane_detection,
-        lower_cross_detection=lower_cross_detection,
-        show_debug=False,
-    )
+        if upper_cross_detection.best_candidate is None:
+            raise ValueError("No upper Pivot cross candidate was selected.")
 
-    # Stage 4: detect the upper Pivot cross.
-    upper_cross_detection = get_upper_cross_detection(
-        height_map=height_map,
-        pivot_segmentation=pivot_segmentation,
-        lower_plane_detection=lower_plane_detection,
-        lower_cross_detection=lower_cross_detection,
-        show_debug=False,
-    )
+        completed_stages.append(current_stage)
 
-    # Stage 5: measure the height difference between the two Pivot surfaces.
-    pivot_height_result = get_pivot_plane_height_difference(
-        height_map=height_map,
-        lower_plane_detection=lower_plane_detection,
+        # Stage 5: measure the height difference between the two Pivot surfaces.
+        current_stage = "Stage 5 — Pivot plane-height difference"
+        pivot_height_result = get_pivot_plane_height_difference(
+            height_map=height_map,
+            lower_plane_detection=lower_plane_detection,
+            lower_cross_detection=lower_cross_detection,
+            pivot_segmentation=pivot_segmentation,
+            upper_cross_detection=upper_cross_detection,
+            print_debug=print_debug,
+            show_debug=show_debug,
+        )
+        completed_stages.append(current_stage)
+
+        # Stage 6: detect and label the Xpander.
+        current_stage = "Stage 6 — Xpander segmentation"
+        xpander_segmentation = get_xpander_segmentation(
+            height_map=height_map,
+            pivot_segmentation=pivot_segmentation,
+            print_debug=print_debug,
+            show_debug=show_debug,
+        )
+        completed_stages.append(current_stage)
+
+        # Stage 7: measure the Xpander radius of curvature.
+        current_stage = "Stage 7 — Xpander curvature"
+        xpander_curvature = get_xpander_curvature(
+            height_map=height_map,
+            xpander_segmentation=xpander_segmentation,
+            print_debug=print_debug,
+            show_debug=show_debug,
+        )
+        completed_stages.append(current_stage)
+
+    except Exception as error:
+        failed_stage = current_stage
+        failure_message = str(error)
+        caught_error = error
+
+        print(
+            f"Analysis stopped at {failed_stage}: "
+            f"{failure_message}"
+        )
+
+    cross_centers = _collect_cross_centers(
         lower_cross_detection=lower_cross_detection,
-        pivot_segmentation=pivot_segmentation,
         upper_cross_detection=upper_cross_detection,
-        show_debug=False,
     )
 
-    # Stage 6: detect and label the Xpander.
-    xpander_segmentation = get_xpander_segmentation(
-        height_map=height_map,
+    final_label_map = _build_partial_label_map(
+        image_shape=height_map.shape,
         pivot_segmentation=pivot_segmentation,
-        show_debug=True,
+        xpander_segmentation=xpander_segmentation,
     )
 
-    # The Xpander label is not available yet, but the Pivot mask is.
-    final_label_map = np.zeros(
-        height_map.shape,
-        dtype=np.uint8,
+    should_create_summary = (
+        summary_plot
+        or summary_output_path is not None
+        or failed_stage is not None
     )
-    final_label_map[
-        pivot_segmentation.pivot_mask
-    ] = 1
-    # final_label_map[
-    #     xpander_segmentation.xpander_mask
-    # ] = 2
 
-    return RawAnalysisResult(
-        status="not_implemented",
-        pivot_height_difference_um=pivot_height_result.height_difference,
+    if should_create_summary:
+        plot_analysis_summary(
+            height_map=height_map,
+            lower_plane_detection=lower_plane_detection,
+            lower_cross_detection=lower_cross_detection,
+            pivot_segmentation=pivot_segmentation,
+            upper_cross_detection=upper_cross_detection,
+            pivot_height_result=pivot_height_result,
+            xpander_segmentation=xpander_segmentation,
+            xpander_curvature=xpander_curvature,
+            completed_stages=completed_stages,
+            failed_stage=failed_stage,
+            failure_message=failure_message,
+            file_name=input_file_name,
+            output_path=summary_output_path,
+            show=(
+                summary_plot
+                or (
+                    show_summary_on_failure
+                    and failed_stage is not None
+                )
+            ),
+        )
+
+    result = RawAnalysisResult(
+        status=(
+            "completed"
+            if failed_stage is None
+            else f"failed: {failed_stage}"
+        ),
+        pivot_height_difference_um=_optional_float(
+            pivot_height_result,
+            "height_difference",
+        ),
         pivot_cross_centers_px=cross_centers,
+        xpander_radius_x_um=_optional_float(
+            xpander_curvature,
+            "radius_x_um",
+        ),
+        xpander_radius_y_um=_optional_float(
+            xpander_curvature,
+            "radius_y_um",
+        ),
+        radius_fit_score_x=_nested_optional_float(
+            xpander_curvature,
+            "x_axis",
+            "confidence",
+        ),
+        radius_fit_score_y=_nested_optional_float(
+            xpander_curvature,
+            "y_axis",
+            "confidence",
+        ),
+        radius_fit_score_overall=_optional_float(
+            xpander_curvature,
+            "confidence",
+        ),
         label_map=final_label_map,
     )
 
+    if caught_error is not None and raise_on_failure:
+        raise caught_error
 
-def get_lower_plane_detection(
-    height_map: np.ndarray,
-    show_debug: bool = False,
-) -> LowerPlaneDetectionResult:
+    return result
+
+
+def _collect_cross_centers(
+    *,
+    lower_cross_detection: Any | None,
+    upper_cross_detection: Any | None,
+) -> list[Point2D]:
+    centers: list[Point2D] = []
+
+    for detection in (
+        lower_cross_detection,
+        upper_cross_detection,
+    ):
+        if detection is None:
+            continue
+
+        candidate = getattr(detection, "best_candidate", None)
+        if candidate is None:
+            continue
+
+        centers.append(
+            Point2D(
+                x=float(candidate.center_x),
+                y=float(candidate.center_y),
+            )
+        )
+
+    return centers
+
+
+def _build_partial_label_map(
+    *,
+    image_shape: tuple[int, int],
+    pivot_segmentation: Any | None,
+    xpander_segmentation: Any | None,
+) -> np.ndarray:
     """
-    Detect and select the best lower-plane candidate.
+    Build the best label map available at the point where processing stopped.
 
-    Returns:
-        The complete LowerPlaneDetectionResult, including all candidates,
-        the selected best candidate, the binary mask and component labels.
+    Labels:
+    0 = background
+    1 = Pivot
+    2 = Xpander
     """
-    detection_result = find_lower_plane_candidates(
-        height_map
-    )
+    label_map = np.zeros(image_shape, dtype=np.uint8)
 
-    best_candidate = detection_result.best_candidate
-
-    if best_candidate is None:
-        raise ValueError(
-            "No lower Pivot plane candidate was found."
+    if xpander_segmentation is not None:
+        xpander_mask = getattr(
+            xpander_segmentation,
+            "xpander_mask",
+            None,
         )
+        if (
+            xpander_mask is not None
+            and xpander_mask.shape == image_shape
+        ):
+            label_map[xpander_mask] = 2
 
-    print("\nSelected lower-plane candidate:")
-    print(f"Component label: {best_candidate.component_label}")
-    print(f"Score: {best_candidate.score:.4f}")
-    print(f"Bounding box: {best_candidate.bounding_box}")
-    print(f"Bounding-box corners: {best_candidate.bounding_box.corners}")
-    print(
-        "Centroid: "
-        f"({best_candidate.centroid_x:.2f}, "
-        f"{best_candidate.centroid_y:.2f})"
-    )
-    print(f"Area: {best_candidate.area_pixels} pixels")
-    print(
-        f"Rectangularity: "
-        f"{best_candidate.rectangularity:.4f}"
-    )
-    print(
-        f"Width/height ratio: "
-        f"{best_candidate.width_height_ratio:.4f}"
-    )
-    print(
-        f"Median height: "
-        f"{best_candidate.median_height:.4f}"
-    )
-    print(
-        f"Height MAD: "
-        f"{best_candidate.height_mad:.4f}"
-    )
-
-    print_lower_plane_candidates(
-        detection_result
-    )
-
-    if show_debug:
-        plot_lower_plane_candidates(
-            height_map=height_map,
-            detection_result=detection_result,
+    if pivot_segmentation is not None:
+        pivot_mask = getattr(
+            pivot_segmentation,
+            "pivot_mask",
+            None,
         )
+        if (
+            pivot_mask is not None
+            and pivot_mask.shape == image_shape
+        ):
+            # Pivot wins in the unlikely case of overlap.
+            label_map[pivot_mask] = 1
 
-    return detection_result
+    return label_map
 
 
-def get_lower_cross_detection(
-    height_map: np.ndarray,
-    lower_plane_detection: LowerPlaneDetectionResult,
-    show_debug: bool = False,
-) -> LowerCrossDetectionResult:
+def _optional_float(
+    result: Any | None,
+    attribute_name: str,
+) -> float:
     """
-    Detect and select the best lower-cross candidate inside the selected
-    lower-plane candidate.
+    Return NaN when a sequential stage did not produce the requested value.
 
-    Returns:
-        The complete LowerCrossDetectionResult.
+    This keeps RawAnalysisResult compatible with float fields without
+    fabricating a measurement.
     """
-    best_plane = lower_plane_detection.best_candidate
+    if result is None:
+        return float("nan")
 
-    if best_plane is None:
-        raise ValueError(
-            "Lower-cross detection requires a valid lower-plane candidate."
-        )
+    value = getattr(result, attribute_name, None)
+    if value is None:
+        return float("nan")
 
-    detection_result = find_lower_cross_candidates(
-        height_map=height_map,
-        lower_plane_detection=lower_plane_detection,
-        lower_plane_candidate=best_plane,
+    return float(value)
+
+
+def _nested_optional_float(
+    result: Any | None,
+    nested_attribute_name: str,
+    value_attribute_name: str,
+) -> float:
+    if result is None:
+        return float("nan")
+
+    nested_result = getattr(
+        result,
+        nested_attribute_name,
+        None,
     )
-
-    best_candidate = detection_result.best_candidate
-
-    if best_candidate is None:
-        raise ValueError(
-            "No lower Pivot cross candidate was found."
-        )
-
-    # LowerCrossDetectionResult has local/global mask methods.
-    # It does not have get_candidate_mask().
-    lower_cross_mask = detection_result.get_candidate_mask_global(
-        candidate=best_candidate,
-        image_shape=height_map.shape,
+    return _optional_float(
+        nested_result,
+        value_attribute_name,
     )
-
-    # Median raw height is not a stored LowerCrossCandidate field,
-    # so calculate it directly from the original height map.
-    median_cross_height = float(
-        np.median(height_map[lower_cross_mask])
-    )
-
-    print("\nSelected lower-cross candidate:")
-    print(f"Component label: {best_candidate.component_label}")
-    print(f"Score: {best_candidate.score:.4f}")
-    print(f"Bounding box: {best_candidate.bounding_box}")
-    print(
-        f"Bounding-box corners: "
-        f"{best_candidate.bounding_box.corners}"
-    )
-    print(
-        "Center: "
-        f"({best_candidate.center_x:.2f}, "
-        f"{best_candidate.center_y:.2f})"
-    )
-    print(f"Area: {best_candidate.area_pixels} pixels")
-    print(
-        f"Area fraction: "
-        f"{best_candidate.area_fraction:.6f}"
-    )
-    print(
-        f"Width/height ratio: "
-        f"{best_candidate.width_height_ratio:.4f}"
-    )
-    print(
-        f"Fill ratio: "
-        f"{best_candidate.fill_ratio:.4f}"
-    )
-    print(
-        f"Horizontal-arm coverage: "
-        f"{best_candidate.horizontal_arm_coverage:.4f}"
-    )
-    print(
-        f"Vertical-arm coverage: "
-        f"{best_candidate.vertical_arm_coverage:.4f}"
-    )
-    print(
-        f"Corner occupancy: "
-        f"{best_candidate.corner_occupancy:.4f}"
-    )
-    print(
-        f"Mean local depth: "
-        f"{best_candidate.mean_depth:.4f}"
-    )
-    print(
-        f"Maximum local depth: "
-        f"{best_candidate.max_depth:.4f}"
-    )
-    print(
-        f"Median raw cross height: "
-        f"{median_cross_height:.4f}"
-    )
-
-    print_lower_cross_candidates(
-        detection_result
-    )
-
-    if show_debug:
-        plot_lower_cross_detection(
-            height_map=height_map,
-            detection_result=detection_result,
-        )
-
-    return detection_result
-
-def get_pivot_segmentation(
-    height_map: np.ndarray,
-    lower_plane_detection: LowerPlaneDetectionResult,
-    lower_cross_detection: LowerCrossDetectionResult,
-    show_debug: bool = False,
-) -> PivotSegmentationResult:
-    """
-    Segment the Pivot region based on the detected lower-plane and
-    lower-cross candidates.
-
-    Returns:
-        The complete segmentation result, including the Pivot mask and
-        boundary diagnostics needed by subsequent detection stages.
-    """
-    segmentation_result = segment_pivot(
-        height_map=height_map,
-        lower_plane_detection=lower_plane_detection,
-        lower_cross_detection=lower_cross_detection,
-    )
-
-    if show_debug:
-        plot_pivot_segmentation(
-            height_map=height_map,
-            result=segmentation_result,
-            lower_plane_detection=lower_plane_detection,
-            lower_cross_detection=lower_cross_detection,
-        )
-
-    return segmentation_result
-
-
-def get_upper_cross_detection(
-    height_map: np.ndarray,
-    pivot_segmentation: PivotSegmentationResult,
-    lower_plane_detection: LowerPlaneDetectionResult,
-    lower_cross_detection: LowerCrossDetectionResult,
-    show_debug: bool = False,
-) -> UpperCrossDetectionResult:
-    """Detect the upper Pivot cross and optionally display its debug plot."""
-    detection_result = find_upper_cross_candidates(
-        height_map=height_map,
-        pivot_segmentation=pivot_segmentation,
-        lower_plane_detection=lower_plane_detection,
-        lower_cross_detection=lower_cross_detection,
-    )
-
-    print_upper_cross_candidates(detection_result)
-
-    best_candidate = detection_result.best_candidate
-    if best_candidate is None:
-        print(
-            "The Pivot was segmented, but no upper cross "
-            "candidate was found."
-        )
-    else:
-        print("\nSelected upper cross:")
-        print(
-            "Center: "
-            f"({best_candidate.center_x:.2f}, "
-            f"{best_candidate.center_y:.2f})"
-        )
-        print(f"Bounding box: {best_candidate.bounding_box}")
-        print(f"Score: {best_candidate.score:.4f}")
-
-    if show_debug:
-        plot_upper_cross_detection(
-            height_map=height_map,
-            result=detection_result,
-            lower_plane_detection=lower_plane_detection,
-            lower_cross_detection=lower_cross_detection,
-        )
-
-    return detection_result
-
-
-def get_pivot_plane_height_difference(
-    height_map: np.ndarray,
-    lower_plane_detection: LowerPlaneDetectionResult,
-    lower_cross_detection: LowerCrossDetectionResult,
-    pivot_segmentation: PivotSegmentationResult,
-    upper_cross_detection: UpperCrossDetectionResult,
-    show_debug: bool = False,
-) -> PivotPlaneHeightDifferenceResult:
-    """Measure the Pivot plane heights and optionally display the debug plot."""
-    measurement_result = measure_pivot_plane_height_difference(
-        height_map=height_map,
-        lower_plane_detection=lower_plane_detection,
-        lower_cross_detection=lower_cross_detection,
-        pivot_segmentation=pivot_segmentation,
-        upper_cross_detection=upper_cross_detection,
-    )
-
-    print_pivot_plane_height_difference(measurement_result)
-
-    if show_debug:
-        plot_pivot_plane_height_measurements(
-            height_map=height_map,
-            result=measurement_result,
-        )
-
-    return measurement_result
-
-
-def get_xpander_segmentation(
-    height_map: np.ndarray,
-    pivot_segmentation: PivotSegmentationResult,
-    show_debug: bool = False,
-) -> XpanderSegmentationResult:
-    """
-    Detect and label the Xpander and optionally display the detection graph.
-    """
-    segmentation_result = segment_xpander(
-        height_map=height_map,
-        pivot_segmentation=pivot_segmentation,
-    )
-
-    print_xpander_segmentation(
-        segmentation_result
-    )
-
-    if show_debug:
-        plot_xpander_segmentation(
-            height_map=height_map,
-            pivot_segmentation=pivot_segmentation,
-            result=segmentation_result,
-        )
-
-    return segmentation_result

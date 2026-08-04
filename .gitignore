@@ -2,3 +2,5 @@ env1/
 Teramount_Home_Assignment/
 Teramount_Home_Assignment.zip
 outputs/
+__pycache__/
+AlgoSteps/__pycache__/

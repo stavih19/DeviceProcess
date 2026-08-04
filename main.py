@@ -10,14 +10,29 @@ from algorithm import analyze_height_map
 from output_writer import save_batch_summary, save_result_files
 
 
+def parse_bool(value: str) -> bool:
+    """Parse a command-line boolean value case-insensitively."""
+    normalized = value.strip().lower()
+    if normalized in {"true", "1", "yes", "y", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(
+        f"expected a boolean value, received {value!r}"
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the Teramount analysis pipeline on all .npy files in a directory."
+        description=(
+            "Run the Teramount analysis pipeline on one .npy file or all "
+            ".npy files in a directory."
+        )
     )
     parser.add_argument(
-        "input_dir",
+        "input_path",
         type=Path,
-        help="Directory containing input .npy height-map files.",
+        help="An input .npy height-map file or a directory containing them.",
     )
     parser.add_argument(
         "--output-dir",
@@ -25,7 +40,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Directory for generated outputs. "
-            "Default: a sibling directory named <input_dir_name>_outputs."
+            "Default: a sibling directory named after the input path."
         ),
     )
     parser.add_argument(
@@ -34,32 +49,82 @@ def parse_args() -> argparse.Namespace:
         default=0.252,
         help="Physical size represented by one pixel, in micrometres. Default: 0.252.",
     )
+    parser.add_argument(
+        "--print-debug",
+        type=parse_bool,
+        nargs="?",
+        const=True,
+        default=False,
+        metavar="BOOL",
+        help=(
+            "Print detailed diagnostics for every algorithm stage. "
+            "Accepts true/false; using the option without a value means true."
+        ),
+    )
+    parser.add_argument(
+        "--show-debug",
+        "--plot-debug",
+        dest="show_debug",
+        type=parse_bool,
+        nargs="?",
+        const=True,
+        default=False,
+        metavar="BOOL",
+        help=(
+            "Display diagnostic Matplotlib figures for every stage. "
+            "Accepts true/false; using the option without a value means true."
+        ),
+    )
+    parser.add_argument(
+        "--summary-plot",
+        "--summery-plot",
+        dest="summary_plot",
+        type=parse_bool,
+        nargs="?",
+        const=True,
+        default=False,
+        metavar="BOOL",
+        help=(
+            "Display the final analysis-summary plot. Accepts true/false; "
+            "using the option without a value means true."
+        ),
+    )
     return parser.parse_args()
 
 
-def resolve_output_dir(input_dir: Path, output_dir: Path | None) -> Path:
+def resolve_output_dir(input_path: Path, output_dir: Path | None) -> Path:
     if output_dir is None:
-        output_dir = input_dir.parent / f"{input_dir.name}_outputs"
+        output_name = (
+            f"{input_path.stem}_outputs"
+            if input_path.is_file()
+            else f"{input_path.name}_outputs"
+        )
+        output_dir = input_path.parent / output_name
 
-    input_dir = input_dir.resolve()
+    input_path = input_path.resolve()
     output_dir = output_dir.resolve()
 
-    if output_dir == input_dir:
-        raise ValueError("The output directory must be different from the input directory.")
+    if output_dir == input_path:
+        raise ValueError("The output directory must be different from the input path.")
 
-    # Do not write generated files inside the input folder.
-    try:
-        output_dir.relative_to(input_dir)
-    except ValueError:
-        pass
-    else:
-        raise ValueError("The output directory must not be inside the input directory.")
+    if input_path.is_dir():
+        # Do not write generated files inside a batch input folder.
+        try:
+            output_dir.relative_to(input_path)
+        except ValueError:
+            pass
+        else:
+            raise ValueError(
+                "The output directory must not be inside the input directory."
+            )
 
     return output_dir
 
 
-def find_input_files(input_dir: Path) -> list[Path]:
-    return sorted(path for path in input_dir.glob("*.npy") if path.is_file())
+def find_input_files(input_path: Path) -> list[Path]:
+    if input_path.is_file():
+        return [input_path] if input_path.suffix.lower() == ".npy" else []
+    return sorted(path for path in input_path.glob("*.npy") if path.is_file())
 
 
 def load_height_map(file_path: Path) -> np.ndarray:
@@ -83,25 +148,29 @@ def load_height_map(file_path: Path) -> np.ndarray:
 
 def main() -> int:
     args = parse_args()
-    input_dir = args.input_dir.resolve()
+    input_path = args.input_path.resolve()
 
-    if not input_dir.exists():
-        print(f"Input directory does not exist: {input_dir}", file=sys.stderr)
+    if not input_path.exists():
+        print(f"Input path does not exist: {input_path}", file=sys.stderr)
         return 2
 
-    if not input_dir.is_dir():
-        print(f"Input path is not a directory: {input_dir}", file=sys.stderr)
+    if not input_path.is_dir() and not input_path.is_file():
+        print(f"Input path is not a file or directory: {input_path}", file=sys.stderr)
+        return 2
+
+    if input_path.is_file() and input_path.suffix.lower() != ".npy":
+        print(f"Input file must have a .npy extension: {input_path}", file=sys.stderr)
         return 2
 
     try:
-        output_dir = resolve_output_dir(input_dir, args.output_dir)
+        output_dir = resolve_output_dir(input_path, args.output_dir)
     except ValueError as error:
         print(error, file=sys.stderr)
         return 2
 
-    input_files = find_input_files(input_dir)
+    input_files = find_input_files(input_path)
     if not input_files:
-        print(f"No .npy files were found in {input_dir}", file=sys.stderr)
+        print(f"No .npy files were found at {input_path}", file=sys.stderr)
         return 1
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -117,6 +186,10 @@ def main() -> int:
             raw_result = analyze_height_map(
                 height_map=height_map,
                 pixel_size_um=args.pixel_size_um,
+                input_file_name=input_file.name,
+                print_debug=args.print_debug,
+                show_debug=args.show_debug,
+                summary_plot=args.summary_plot,
             )
 
             result = save_result_files(

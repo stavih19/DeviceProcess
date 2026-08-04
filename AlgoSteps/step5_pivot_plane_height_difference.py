@@ -6,19 +6,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Rectangle
 
-from AlgoSteps.lower_cross_detection import (
+from AlgoSteps.step2_lower_cross_detection import (
     LowerCrossCandidate,
     LowerCrossDetectionResult,
 )
-from AlgoSteps.pivot_candidates import (
+from AlgoSteps.step1_pivot_candidates import (
     BoolArray,
     BoundingBox,
     FloatArray,
     LowerPlaneCandidate,
     LowerPlaneDetectionResult,
 )
-from AlgoSteps.pivot_segmentation import PivotSegmentationResult
-from AlgoSteps.upper_cross_detection import (
+from AlgoSteps.step3_pivot_segmentation import PivotSegmentationResult
+from AlgoSteps.step4_upper_cross_detection import (
     UpperCrossCandidate,
     UpperCrossDetectionResult,
 )
@@ -639,6 +639,36 @@ def plot_pivot_plane_height_measurements(
     )
     figure.tight_layout()
     plt.show()
+
+
+def get_pivot_plane_height_difference(
+    height_map: FloatArray,
+    lower_plane_detection: LowerPlaneDetectionResult,
+    lower_cross_detection: LowerCrossDetectionResult,
+    pivot_segmentation: PivotSegmentationResult,
+    upper_cross_detection: UpperCrossDetectionResult,
+    print_debug: bool = False,
+    show_debug: bool = False,
+) -> PivotPlaneHeightDifferenceResult:
+    """Measure the Pivot plane heights and optionally display the debug plot."""
+    measurement_result = measure_pivot_plane_height_difference(
+        height_map=height_map,
+        lower_plane_detection=lower_plane_detection,
+        lower_cross_detection=lower_cross_detection,
+        pivot_segmentation=pivot_segmentation,
+        upper_cross_detection=upper_cross_detection,
+    )
+
+    if print_debug:
+        print_pivot_plane_height_difference(measurement_result)
+
+    if show_debug:
+        plot_pivot_plane_height_measurements(
+            height_map=height_map,
+            result=measurement_result,
+        )
+
+    return measurement_result
 
 
 def _measure_surface_from_side_strips(

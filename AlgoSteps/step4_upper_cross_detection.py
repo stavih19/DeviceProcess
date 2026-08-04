@@ -8,15 +8,15 @@ from matplotlib.patches import Rectangle
 from numpy.typing import NDArray
 from scipy import ndimage as ndi
 
-from AlgoSteps.lower_cross_detection import LowerCrossDetectionResult
-from AlgoSteps.pivot_candidates import (
+from AlgoSteps.step2_lower_cross_detection import LowerCrossDetectionResult
+from AlgoSteps.step1_pivot_candidates import (
     BoolArray,
     BoundingBox,
     FloatArray,
     IntArray,
     LowerPlaneDetectionResult,
 )
-from AlgoSteps.pivot_segmentation import PivotSegmentationResult
+from AlgoSteps.step3_pivot_segmentation import PivotSegmentationResult
 
 
 @dataclass(frozen=True)
@@ -935,6 +935,36 @@ def plot_upper_cross_detection(
     )
     figure.tight_layout()
     plt.show()
+
+
+def get_upper_cross_detection(
+    height_map: FloatArray,
+    pivot_segmentation: PivotSegmentationResult,
+    lower_plane_detection: LowerPlaneDetectionResult,
+    lower_cross_detection: LowerCrossDetectionResult,
+    print_debug: bool = False,
+    show_debug: bool = False,
+) -> UpperCrossDetectionResult:
+    """Detect the upper Pivot cross and optionally display its debug plot."""
+    detection_result = find_upper_cross_candidates(
+        height_map=height_map,
+        pivot_segmentation=pivot_segmentation,
+        lower_plane_detection=lower_plane_detection,
+        lower_cross_detection=lower_cross_detection,
+    )
+
+    if print_debug:
+        print_upper_cross_candidates(detection_result)
+
+    if show_debug:
+        plot_upper_cross_detection(
+            height_map=height_map,
+            result=detection_result,
+            lower_plane_detection=lower_plane_detection,
+            lower_cross_detection=lower_cross_detection,
+        )
+
+    return detection_result
 
 
 def _create_upper_search_mask(
