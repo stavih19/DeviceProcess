@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from AlgoSteps.debug_utils import debug_print_context
+
 from dataclasses import dataclass, field
 
 import matplotlib.pyplot as plt
@@ -946,12 +948,13 @@ def get_upper_cross_detection(
     show_debug: bool = False,
 ) -> UpperCrossDetectionResult:
     """Detect the upper Pivot cross and optionally display its debug plot."""
-    detection_result = find_upper_cross_candidates(
-        height_map=height_map,
-        pivot_segmentation=pivot_segmentation,
-        lower_plane_detection=lower_plane_detection,
-        lower_cross_detection=lower_cross_detection,
-    )
+    with debug_print_context(print_debug):
+        detection_result = find_upper_cross_candidates(
+            height_map=height_map,
+            pivot_segmentation=pivot_segmentation,
+            lower_plane_detection=lower_plane_detection,
+            lower_cross_detection=lower_cross_detection,
+        )
 
     if print_debug:
         print_upper_cross_candidates(detection_result)

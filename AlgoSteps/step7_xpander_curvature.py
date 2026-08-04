@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from AlgoSteps.debug_utils import debug_print_context
+
 from dataclasses import dataclass
 from typing import Literal, Sequence
 
@@ -1192,10 +1194,11 @@ def get_xpander_curvature(
     show_debug: bool = False,
 ) -> XpanderCurvatureResult:
     """Measure Xpander curvature and optionally display the debug plot."""
-    curvature_result = measure_xpander_curvature(
-        height_map=height_map,
-        xpander_segmentation=xpander_segmentation,
-    )
+    with debug_print_context(print_debug):
+        curvature_result = measure_xpander_curvature(
+            height_map=height_map,
+            xpander_segmentation=xpander_segmentation,
+        )
 
     if print_debug:
         print_xpander_curvature(curvature_result)

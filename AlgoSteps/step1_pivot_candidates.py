@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from AlgoSteps.debug_utils import debug_print_context
+
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -577,7 +579,8 @@ def get_lower_plane_detection(
     show_debug: bool = False,
 ) -> LowerPlaneDetectionResult:
     """Detect the lower Pivot plane and optionally display its debug plot."""
-    detection_result = find_lower_plane_candidates(height_map)
+    with debug_print_context(print_debug):
+        detection_result = find_lower_plane_candidates(height_map)
 
     if detection_result.best_candidate is None:
         raise ValueError("No lower Pivot plane candidate was found.")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from AlgoSteps.debug_utils import debug_print_context
+
 from dataclasses import dataclass
 from typing import Literal
 
@@ -19,12 +21,12 @@ try:
     )
     from AlgoSteps.step3_pivot_segmentation import PivotSegmentationResult
 except ImportError:
-    from AlgoSteps.step1_pivot_candidates import (
+    from step1_pivot_candidates import (
         BoolArray,
         BoundingBox,
         FloatArray,
     )
-    from AlgoSteps.step3_pivot_segmentation import PivotSegmentationResult
+    from step3_pivot_segmentation import PivotSegmentationResult
 
 
 SideName = Literal["left", "right"]
@@ -68,6 +70,10 @@ class XpanderSegmentationConfig:
     profile_gaussian_sigma: float = 0.35
     profile_band_half_width: int = 3
 
+    # Bottom horizontal profile aggregation.
+    bottom_profile_band_half_width: int = 2
+    bottom_profile_band_percentile: float = 75.0
+
     # Side-wall search outside the Pivot.
     side_wall_min_gap_fraction: float = 0.03
     side_wall_max_distance_factor: float = 3.0
@@ -81,6 +87,10 @@ class XpanderSegmentationConfig:
     reference_corner_gradient_mad_multiplier: float = 2.5
     reference_corner_min_prominence: float = 0.01
     reference_corner_cluster_min_relative_strength: float = 0.25
+
+    reference_wall_max_candidates: int = 3
+    reference_corner_max_candidates: int = 6
+    reference_total_max_candidates: int = 12
 
     # Nearby parallel edges are treated as one shadow/halo cluster.
     # The algorithm deliberately selects the far edge of the first cluster in
@@ -105,6 +115,12 @@ class XpanderSegmentationConfig:
     threshold_max_width_fraction: float = 0.25
     minimum_threshold_rise_fraction: float = 0.0015
     minimum_threshold_rise_absolute: float = 0.02
+
+    # Search several horizontal profiles around the approximate
+    # reference-corner Y coordinate.
+    bottom_profile_y_search_radius: int = 20
+    bottom_profile_y_search_step: int = 2
+    bottom_profile_y_distance_weight: float = 0.10
 
     # The region before the threshold must still resemble the stable Xpander
     # plateau. This prevents an outer shadow edge from being selected.
@@ -150,6 +166,16 @@ class XpanderSegmentationConfig:
     reference_score_weight: float = 0.20
     geometry_score_weight: float = 0.20
     minimum_confidence: float = 0.45
+
+    bottom_profile_y_penalty_per_pixel: float = 0.025
+
+    # After the top raised strip, the profile must fall clearly below
+    # the Xpander plateau. This rejects small bumps that return to the
+    # same Xpander surface.
+    top_post_fall_drop_min_fraction: float = 0.01
+    top_post_fall_drop_min_absolute: float = 0.10
+
+    top_min_progress_toward_background_fraction: float = 0.10
 
 
 @dataclass(frozen=True)
@@ -298,6 +324,7 @@ def segment_xpander(
     height_map: FloatArray,
     pivot_segmentation: PivotSegmentationResult,
     config: XpanderSegmentationConfig | None = None,
+    show_corner_debug: bool = False,
 ) -> XpanderSegmentationResult:
     """Detect and label the Xpander using the corrected outward geometry."""
     if config is None:
@@ -327,51 +354,132 @@ def segment_xpander(
         gradient_y=gradient_y,
     )
 
-    try:
-        left_reference = _find_reference_corner(
-            side="left",
-            gradient_x=gradient_x,
-            gradient_y=gradient_y,
-            pivot_box=pivot_box,
-            config=config,
-        )
-    except ValueError as error:
-        raise ValueError(f"Left Xpander reference corner failed: {error}") from error
+    detected_corners: list[tuple[str, PixelPoint]] = []
 
+    # $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$44
     try:
-        right_reference = _find_reference_corner(
-            side="right",
-            gradient_x=gradient_x,
-            gradient_y=gradient_y,
-            pivot_box=pivot_box,
-            config=config,
+        left_reference_candidates = (
+            _find_reference_corner_candidates(
+                side="left",
+                gradient_x=gradient_x,
+                gradient_y=gradient_y,
+                pivot_box=pivot_box,
+                config=config,
+            )
         )
-    except ValueError as error:
-        raise ValueError(f"Right Xpander reference corner failed: {error}") from error
 
-    try:
-        left_side = _find_bottom_xpander_corner(
+        (
+            left_reference,
+            left_side,
+        ) = _select_reference_and_bottom_corner(
             side="left",
             smoothed=smoothed,
-            reference_corner=left_reference,
+            reference_candidates=(
+                left_reference_candidates
+            ),
             background_height=background_height,
-            robust_height_range=robust_height_range,
+            robust_height_range=(
+                robust_height_range
+            ),
             config=config,
         )
+
     except ValueError as error:
-        raise ValueError(f"Left bottom Xpander corner failed: {error}") from error
+        raise ValueError(
+            "Left Xpander reference/bottom "
+            f"corner failed: {error}"
+        ) from error
+
+    detected_corners.append(
+        (
+            "Left reference",
+            left_reference.point,
+        )
+    )
+    if show_corner_debug:
+        _show_detected_xpander_corners(
+            height_map=height_map,
+            pivot_box=pivot_box,
+            detected_corners=detected_corners,
+            title="Selected left reference corner",
+        )
+
+    detected_corners.append(
+        (
+            "Left bottom",
+            left_side.bottom_corner,
+        )
+    )
+    if show_corner_debug:
+        _show_detected_xpander_corners(
+            height_map=height_map,
+            pivot_box=pivot_box,
+            detected_corners=detected_corners,
+            title="Left bottom Xpander corner found",
+        )
 
     try:
-        right_side = _find_bottom_xpander_corner(
+        right_reference_candidates = (
+            _find_reference_corner_candidates(
+                side="right",
+                gradient_x=gradient_x,
+                gradient_y=gradient_y,
+                pivot_box=pivot_box,
+                config=config,
+            )
+        )
+
+        (
+            right_reference,
+            right_side,
+        ) = _select_reference_and_bottom_corner(
             side="right",
             smoothed=smoothed,
-            reference_corner=right_reference,
+            reference_candidates=(
+                right_reference_candidates
+            ),
             background_height=background_height,
-            robust_height_range=robust_height_range,
+            robust_height_range=(
+                robust_height_range
+            ),
             config=config,
         )
+
     except ValueError as error:
-        raise ValueError(f"Right bottom Xpander corner failed: {error}") from error
+        raise ValueError(
+            "Right Xpander reference/bottom "
+            f"corner failed: {error}"
+        ) from error
+
+    detected_corners.append(
+        (
+            "Right reference",
+            right_reference.point,
+        )
+    )
+    if show_corner_debug:
+        _show_detected_xpander_corners(
+            height_map=height_map,
+            pivot_box=pivot_box,
+            detected_corners=detected_corners,
+            title="Selected right reference corner",
+        )
+
+    detected_corners.append(
+        (
+            "Right bottom",
+            right_side.bottom_corner,
+        )
+    )
+    if show_corner_debug:
+        _show_detected_xpander_corners(
+            height_map=height_map,
+            pivot_box=pivot_box,
+            detected_corners=detected_corners,
+            title="Right bottom Xpander corner found",
+        )
+
+    # $$$$$$$$$$$$$$$$$$$$$
 
     bottom_left = left_side.bottom_corner
     bottom_right = right_side.bottom_corner
@@ -400,6 +508,14 @@ def segment_xpander(
         )
     except ValueError as error:
         raise ValueError(f"Left top Xpander corner failed: {error}") from error
+    detected_corners.append(("Left top", left_top.top_corner))
+    if show_corner_debug:
+        _show_detected_xpander_corners(
+            height_map=height_map,
+            pivot_box=pivot_box,
+            detected_corners=detected_corners,
+            title="Left top Xpander corner found",
+        )
 
     try:
         right_top = _find_top_xpander_corner(
@@ -413,6 +529,14 @@ def segment_xpander(
         )
     except ValueError as error:
         raise ValueError(f"Right top Xpander corner failed: {error}") from error
+    detected_corners.append(("Right top", right_top.top_corner))
+    if show_corner_debug:
+        _show_detected_xpander_corners(
+            height_map=height_map,
+            pivot_box=pivot_box,
+            detected_corners=detected_corners,
+            title="Right top Xpander corner found",
+        )
 
     top_left = PixelPoint(x=bottom_left.x, y=left_top.top_corner.y)
     top_right = PixelPoint(x=bottom_right.x, y=right_top.top_corner.y)
@@ -492,6 +616,39 @@ def segment_xpander(
         gradient_x=gradient_x,
         gradient_y=gradient_y,
     )
+
+def _get_strong_clusters(
+    clusters: list[list[tuple[int, float]]],
+    minimum_relative_strength: float,
+) -> list[list[tuple[int, float]]]:
+    """
+    Keep clusters whose strongest peak is sufficiently strong relative
+    to the strongest peak among all clusters.
+    """
+    if not clusters:
+        return []
+
+    maximum_strength = max(
+        strength
+        for cluster in clusters
+        for _, strength in cluster
+    )
+
+    minimum_strength = (
+        minimum_relative_strength
+        * maximum_strength
+    )
+
+    strong_clusters = [
+        cluster
+        for cluster in clusters
+        if max(
+            strength
+            for _, strength in cluster
+        ) >= minimum_strength
+    ]
+
+    return strong_clusters or clusters
 
 
 def _find_reference_corner(
@@ -647,11 +804,921 @@ def _find_reference_corner(
         corner_was_inferred=corner_was_inferred,
     )
 
+def _find_reference_corner_candidates(
+    side: SideName,
+    gradient_x: NDArray[np.float32],
+    gradient_y: NDArray[np.float32],
+    pivot_box: BoundingBox,
+    config: XpanderSegmentationConfig,
+) -> list[ReferenceCorner]:
+    """
+    Return several possible reference corners.
+
+    Unlike the previous implementation, this function does not commit to the
+    first strong shadow/halo corner. It returns candidates from several wall
+    clusters and several horizontal corner clusters.
+
+    The caller must validate every candidate by trying to detect the real
+    bottom Xpander boundary from it.
+    """
+    image_height, image_width = gradient_x.shape
+
+    side_gap = max(
+        1,
+        int(
+            round(
+                pivot_box.width
+                * config.side_wall_min_gap_fraction
+            )
+        ),
+    )
+
+    max_side_distance = max(
+        pivot_box.width,
+        int(
+            round(
+                pivot_box.width
+                * config.side_wall_max_distance_factor
+            )
+        ),
+    )
+
+    y_start = max(
+        0,
+        pivot_box.y_min,
+    )
+    y_stop = min(
+        image_height,
+        pivot_box.y_max,
+    )
+
+    if y_stop <= y_start:
+        raise ValueError(
+            "Pivot vertical range is invalid "
+            "for side-wall search."
+        )
+
+    vertical_strength = np.median(
+        np.abs(
+            gradient_x[
+                y_start:y_stop,
+                :,
+            ]
+        ),
+        axis=0,
+    )
+
+    if side == "left":
+        search_start = max(
+            0,
+            pivot_box.x_min
+            - max_side_distance,
+        )
+        search_stop = max(
+            search_start + 1,
+            pivot_box.x_min
+            - side_gap,
+        )
+    else:
+        search_start = min(
+            image_width - 1,
+            pivot_box.x_max
+            + side_gap,
+        )
+        search_stop = min(
+            image_width,
+            pivot_box.x_max
+            + max_side_distance,
+        )
+
+    wall_positions, wall_strengths = (
+        _find_profile_peaks(
+            profile=vertical_strength,
+            start=search_start,
+            stop=search_stop,
+            mad_multiplier=(
+                config.side_wall_gradient_mad_multiplier
+            ),
+            minimum_prominence=(
+                config.side_wall_min_prominence
+            ),
+        )
+    )
+
+    wall_cluster_candidates: list[
+        tuple[
+            list[tuple[int, float]],
+            bool,
+        ]
+    ] = []
+
+    if wall_positions:
+        wall_clusters = _cluster_peaks(
+            wall_positions,
+            wall_strengths,
+            max_gap=(
+                config.halo_cluster_max_gap_pixels
+            ),
+        )
+
+        wall_clusters = _get_strong_clusters(
+            clusters=wall_clusters,
+            minimum_relative_strength=(
+                config.side_wall_cluster_min_relative_strength
+            ),
+        )
+
+        if side == "left":
+            # Nearest wall first while travelling left from the Pivot.
+            wall_clusters = sorted(
+                wall_clusters,
+                key=lambda cluster: (
+                    pivot_box.x_min
+                    - max(
+                        position
+                        for position, _ in cluster
+                    )
+                ),
+            )
+        else:
+            # Nearest wall first while travelling right from the Pivot.
+            wall_clusters = sorted(
+                wall_clusters,
+                key=lambda cluster: (
+                    min(
+                        position
+                        for position, _ in cluster
+                    )
+                    - pivot_box.x_max
+                ),
+            )
+
+        for cluster in wall_clusters[
+            :config.reference_wall_max_candidates
+        ]:
+            wall_cluster_candidates.append(
+                (
+                    cluster,
+                    False,
+                )
+            )
+
+    else:
+        segment = vertical_strength[
+            search_start:search_stop
+        ]
+
+        if segment.size == 0:
+            raise ValueError(
+                "No valid side-wall search interval remains."
+            )
+
+        inferred_wall_x = (
+            search_start
+            + int(np.argmax(segment))
+        )
+
+        wall_cluster_candidates.append(
+            (
+                [
+                    (
+                        inferred_wall_x,
+                        0.15,
+                    )
+                ],
+                True,
+            )
+        )
+
+    candidates: list[ReferenceCorner] = []
+
+    for (
+        wall_cluster,
+        wall_was_inferred,
+    ) in wall_cluster_candidates:
+        wall_cluster_positions = [
+            position
+            for position, _ in wall_cluster
+        ]
+
+        # Move through the wall halo in the outward direction.
+        wall_x = (
+            min(wall_cluster_positions)
+            if side == "left"
+            else max(wall_cluster_positions)
+        )
+
+        wall_cluster_start = min(
+            wall_cluster_positions
+        )
+        wall_cluster_end = max(
+            wall_cluster_positions
+        )
+
+        wall_score = float(
+            max(
+                strength
+                for _, strength in wall_cluster
+            )
+            / max(
+                max(wall_strengths)
+                if wall_strengths
+                else 1.0,
+                1e-8,
+            )
+        )
+
+        half_band = (
+            config.profile_band_half_width
+        )
+
+        wall_band_start = max(
+            0,
+            wall_x - half_band,
+        )
+        wall_band_stop = min(
+            image_width,
+            wall_x + half_band + 1,
+        )
+
+        horizontal_strength = np.median(
+            np.abs(
+                gradient_y[
+                    :,
+                    wall_band_start:wall_band_stop,
+                ]
+            ),
+            axis=1,
+        )
+
+        corner_gap = max(
+            1,
+            int(
+                round(
+                    pivot_box.height
+                    * config.reference_corner_gap_fraction
+                )
+            ),
+        )
+
+        max_corner_distance = max(
+            pivot_box.height,
+            int(
+                round(
+                    pivot_box.height
+                    * config.reference_corner_max_distance_factor
+                )
+            ),
+        )
+
+        corner_search_start = max(
+            0,
+            pivot_box.y_min
+            - max_corner_distance,
+        )
+        corner_search_stop = max(
+            corner_search_start + 1,
+            pivot_box.y_min
+            - corner_gap,
+        )
+
+        (
+            corner_positions,
+            corner_strengths,
+        ) = _find_profile_peaks(
+            profile=horizontal_strength,
+            start=corner_search_start,
+            stop=corner_search_stop,
+            mad_multiplier=(
+                config.reference_corner_gradient_mad_multiplier
+            ),
+            minimum_prominence=(
+                config.reference_corner_min_prominence
+            ),
+        )
+
+        corner_cluster_candidates: list[
+            tuple[
+                list[tuple[int, float]],
+                bool,
+            ]
+        ] = []
+
+        if corner_positions:
+            corner_clusters = _cluster_peaks(
+                corner_positions,
+                corner_strengths,
+                max_gap=(
+                    config.halo_cluster_max_gap_pixels
+                ),
+            )
+
+            corner_clusters = _get_strong_clusters(
+                clusters=corner_clusters,
+                minimum_relative_strength=(
+                    config.reference_corner_cluster_min_relative_strength
+                ),
+            )
+
+            # While moving upward, the nearest cluster has the greatest Y.
+            corner_clusters = sorted(
+                corner_clusters,
+                key=lambda cluster: (
+                    pivot_box.y_min
+                    - max(
+                        position
+                        for position, _ in cluster
+                    )
+                ),
+            )
+
+            for cluster in corner_clusters[
+                :config.reference_corner_max_candidates
+            ]:
+                corner_cluster_candidates.append(
+                    (
+                        cluster,
+                        False,
+                    )
+                )
+
+        else:
+            segment = horizontal_strength[
+                corner_search_start:
+                corner_search_stop
+            ]
+
+            if segment.size == 0:
+                continue
+
+            inferred_corner_y = (
+                corner_search_start
+                + int(np.argmax(segment))
+            )
+
+            corner_cluster_candidates.append(
+                (
+                    [
+                        (
+                            inferred_corner_y,
+                            0.15,
+                        )
+                    ],
+                    True,
+                )
+            )
+
+        for (
+            corner_cluster,
+            corner_was_inferred,
+        ) in corner_cluster_candidates:
+            corner_cluster_positions = [
+                position
+                for position, _ in corner_cluster
+            ]
+
+            # Cross the entire local halo cluster while moving upward.
+            corner_y = min(
+                corner_cluster_positions
+            )
+
+            corner_score = float(
+                max(
+                    strength
+                    for _, strength in corner_cluster
+                )
+                / max(
+                    max(corner_strengths)
+                    if corner_strengths
+                    else 1.0,
+                    1e-8,
+                )
+            )
+
+            candidates.append(
+                ReferenceCorner(
+                    side=side,
+                    point=PixelPoint(
+                        x=int(wall_x),
+                        y=int(corner_y),
+                    ),
+                    wall_x=int(wall_x),
+                    wall_score=wall_score,
+                    corner_score=corner_score,
+                    wall_cluster_start=int(
+                        wall_cluster_start
+                    ),
+                    wall_cluster_end=int(
+                        wall_cluster_end
+                    ),
+                    corner_cluster_start=int(
+                        min(
+                            corner_cluster_positions
+                        )
+                    ),
+                    corner_cluster_end=int(
+                        max(
+                            corner_cluster_positions
+                        )
+                    ),
+                    wall_was_inferred=(
+                        wall_was_inferred
+                    ),
+                    corner_was_inferred=(
+                        corner_was_inferred
+                    ),
+                )
+            )
+
+    if not candidates:
+        raise ValueError(
+            f"No {side} reference-corner candidates were found."
+        )
+
+    # Prefer geometrically closer candidates first for debugging and
+    # deterministic ordering. Final selection is performed using the
+    # bottom-transition score.
+    def candidate_distance(
+        candidate: ReferenceCorner,
+    ) -> float:
+        if side == "left":
+            horizontal_distance = (
+                pivot_box.x_min
+                - candidate.point.x
+            )
+        else:
+            horizontal_distance = (
+                candidate.point.x
+                - pivot_box.x_max
+            )
+
+        vertical_distance = (
+            pivot_box.y_min
+            - candidate.point.y
+        )
+
+        return float(
+            max(horizontal_distance, 0)
+            + max(vertical_distance, 0)
+        )
+
+    candidates.sort(
+        key=candidate_distance
+    )
+
+    return candidates[
+        :config.reference_total_max_candidates
+    ]
+
+
+def _select_reference_and_bottom_corner(
+    side: SideName,
+    smoothed: NDArray[np.float32],
+    reference_candidates: list[ReferenceCorner],
+    background_height: float,
+    robust_height_range: float,
+    config: XpanderSegmentationConfig,
+) -> tuple[
+    ReferenceCorner,
+    SideCornerDetection,
+]:
+    """
+    Try every reference candidate.
+
+    A reference corner is accepted only if it leads to a valid bottom
+    Xpander transition. The best successful reference is selected using
+    the reference score and the transition score.
+    """
+    successful_candidates: list[
+        tuple[
+            float,
+            ReferenceCorner,
+            SideCornerDetection,
+        ]
+    ] = []
+
+    failure_messages: list[str] = []
+
+    for candidate_index, candidate in enumerate(
+        reference_candidates,
+        start=1,
+    ):
+        try:
+            detection = (
+                _find_bottom_xpander_corner(
+                    side=side,
+                    smoothed=smoothed,
+                    reference_corner=candidate,
+                    background_height=background_height,
+                    robust_height_range=(
+                        robust_height_range
+                    ),
+                    config=config,
+                )
+            )
+        except ValueError as error:
+            failure_messages.append(
+                f"candidate {candidate_index} "
+                f"at ({candidate.point.x}, "
+                f"{candidate.point.y}): {error}"
+            )
+            continue
+
+        combined_score = float(
+            0.30 * candidate.score
+            + 0.70 * detection.transition.score
+        )
+
+        successful_candidates.append(
+            (
+                combined_score,
+                candidate,
+                detection,
+            )
+        )
+
+    if not successful_candidates:
+        recent_failures = "; ".join(
+            failure_messages[-3:]
+        )
+
+        raise ValueError(
+            f"Tried {len(reference_candidates)} "
+            f"{side} reference candidates, but none "
+            "produced a valid bottom Xpander boundary. "
+            f"Recent failures: {recent_failures}"
+        )
+
+    (
+        best_score,
+        best_reference,
+        best_detection,
+    ) = max(
+        successful_candidates,
+        key=lambda item: item[0],
+    )
+
+    print(
+        f"Selected {side} reference: "
+        f"point={best_reference.point}, "
+        f"wall_cluster=("
+        f"{best_reference.wall_cluster_start}, "
+        f"{best_reference.wall_cluster_end}), "
+        f"corner_cluster=("
+        f"{best_reference.corner_cluster_start}, "
+        f"{best_reference.corner_cluster_end}), "
+        f"combined_score={best_score:.4f}"
+    )
+
+    return (
+        best_reference,
+        best_detection,
+    )
+
+
+# def _find_bottom_xpander_corner(
+#     side: SideName,
+#     smoothed: NDArray[np.float32],
+#     reference_corner: ReferenceCorner,
+#     background_height: float,
+#     robust_height_range: float,
+#     config: XpanderSegmentationConfig,
+# ) -> SideCornerDetection:
+#     """
+#     Search several horizontal rows around the approximate reference-corner Y.
+
+#     The reference detector provides an approximate structural location. It does
+#     not guarantee that its exact Y coordinate crosses a clean Xpander plateau.
+#     """
+#     image_height = smoothed.shape[0]
+#     reference_y = reference_corner.point.y
+
+#     radius = max(
+#         0,
+#         config.bottom_profile_y_search_radius,
+#     )
+#     step = max(
+#         1,
+#         config.bottom_profile_y_search_step,
+#     )
+
+#     candidate_y_values: list[int] = [
+#         reference_y,
+#     ]
+
+#     for offset in range(
+#         step,
+#         radius + 1,
+#         step,
+#     ):
+#         # Try the nearest rows first.
+#         candidate_y_values.append(
+#             reference_y - offset
+#         )
+#         candidate_y_values.append(
+#             reference_y + offset
+#         )
+
+#     # Remove duplicates and invalid coordinates while preserving order.
+#     valid_y_values: list[int] = []
+#     seen: set[int] = set()
+
+#     for candidate_y in candidate_y_values:
+#         if candidate_y < 0 or candidate_y >= image_height:
+#             continue
+#         if candidate_y in seen:
+#             continue
+
+#         seen.add(candidate_y)
+#         valid_y_values.append(candidate_y)
+
+#     successful_detections: list[
+#         tuple[
+#             float,
+#             SideCornerDetection,
+#         ]
+#     ] = []
+
+#     failure_messages: list[str] = []
+
+#     for scan_y in valid_y_values:
+#         try:
+#             detection = _find_bottom_xpander_corner_at_y(
+#                 side=side,
+#                 smoothed=smoothed,
+#                 reference_corner=reference_corner,
+#                 scan_y=scan_y,
+#                 background_height=background_height,
+#                 robust_height_range=robust_height_range,
+#                 config=config,
+#             )
+#         except ValueError as error:
+#             failure_messages.append(
+#                 f"y={scan_y}: {error}"
+#             )
+#             continue
+
+#         distance = abs(
+#             scan_y - reference_y
+#         )
+
+#         distance_score = float(
+#             np.exp(
+#                 -distance
+#                 / max(
+#                     radius,
+#                     1,
+#                 )
+#             )
+#         )
+
+#         combined_score = float(
+#             (
+#                 1.0
+#                 - config.bottom_profile_y_distance_weight
+#             )
+#             * detection.transition.score
+#             + config.bottom_profile_y_distance_weight
+#             * distance_score
+#         )
+
+#         successful_detections.append(
+#             (
+#                 combined_score,
+#                 detection,
+#             )
+#         )
+
+#     if not successful_detections:
+#         recent_failures = "; ".join(
+#             failure_messages[-4:]
+#         )
+
+#         raise ValueError(
+#             f"No valid {side} bottom transition was found "
+#             f"within Y={reference_y - radius}:"
+#             f"{reference_y + radius} around reference "
+#             f"{reference_corner.point}. "
+#             f"Recent failures: {recent_failures}"
+#         )
+
+#     (
+#         selected_score,
+#         selected_detection,
+#     ) = max(
+#         successful_detections,
+#         key=lambda item: item[0],
+#     )
+
+#     print(
+#         f"Selected {side} bottom profile: "
+#         f"reference={reference_corner.point}, "
+#         f"scan_y={selected_detection.bottom_corner.y}, "
+#         f"bottom_x={selected_detection.bottom_corner.x}, "
+#         f"transition_score="
+#         f"{selected_detection.transition.score:.4f}, "
+#         f"combined_score={selected_score:.4f}"
+#     )
+
+#     return selected_detection
+
+
+def _try_bottom_profile_offsets(
+    side: SideName,
+    smoothed: NDArray[np.float32],
+    reference_corner: ReferenceCorner,
+    offsets: tuple[int, ...],
+    background_height: float,
+    robust_height_range: float,
+    config: XpanderSegmentationConfig,
+    phase_name: str,
+) -> SideCornerDetection | None:
+    """
+    Try candidate rows in the supplied order.
+
+    Preference is given to the closest valid row. Transition score is used
+    only to compare candidates at the same Y distance.
+    """
+    image_height = smoothed.shape[0]
+    reference_y = reference_corner.point.y
+
+    successful: list[
+        tuple[
+            float,  # selection score
+            int,    # Y distance
+            SideCornerDetection,
+        ]
+    ] = []
+
+    for offset in offsets:
+        scan_y = reference_y + offset
+
+        if scan_y < 0 or scan_y >= image_height:
+            continue
+
+        try:
+            detection = _find_bottom_xpander_corner_at_y(
+                side=side,
+                smoothed=smoothed,
+                reference_corner=reference_corner,
+                scan_y=scan_y,
+                background_height=background_height,
+                robust_height_range=robust_height_range,
+                config=config,
+            )
+        except ValueError as error:
+            print(
+                f"{side.capitalize()} bottom {phase_name} candidate "
+                f"failed: y={scan_y}, offset={offset}: {error}"
+            )
+            continue
+
+        distance = abs(offset)
+
+        selection_score = float(
+            detection.transition.score
+            - config.bottom_profile_y_penalty_per_pixel
+            * distance
+        )
+
+        print(
+            f"{side.capitalize()} bottom {phase_name} candidate "
+            f"passed: y={scan_y}, offset={offset}, "
+            f"x={detection.bottom_corner.x}, "
+            f"transition_score={detection.transition.score:.4f}, "
+            f"selection_score={selection_score:.4f}"
+        )
+
+        successful.append(
+            (
+                selection_score,
+                distance,
+                detection,
+            )
+        )
+
+    if not successful:
+        return None
+
+    (
+        selected_score,
+        selected_distance,
+        best_detection,
+    ) = max(
+        successful,
+        key=lambda item: item[0],
+    )
+
+    print(
+        f"Selected {side} {phase_name} row: "
+        f"x={best_detection.bottom_corner.x}, "
+        f"y={best_detection.bottom_corner.y}, "
+        f"distance={selected_distance}, "
+        f"transition_score="
+        f"{best_detection.transition.score:.4f}, "
+        f"selection_score={selected_score:.4f}"
+    )
+
+    return best_detection
+
 
 def _find_bottom_xpander_corner(
     side: SideName,
     smoothed: NDArray[np.float32],
     reference_corner: ReferenceCorner,
+    background_height: float,
+    robust_height_range: float,
+    config: XpanderSegmentationConfig,
+) -> SideCornerDetection:
+    """
+    First try rows very close to the detected reference corner.
+
+    Only if the normal search fails, expand the Y search for exceptional
+    inputs with damaged or missing corner pixels, such as 6.npy.
+    """
+    image_height = smoothed.shape[0]
+    reference_y = reference_corner.point.y
+
+    # Normal inputs should remain close to the detected reference Y.
+    primary_offsets = (
+        0,
+        -2,
+        2,
+        -4,
+        4,
+    )
+
+    # Wider fallback used only when the normal search completely fails.
+    fallback_offsets: list[int] = []
+    for distance in range(
+        6,
+        config.bottom_profile_y_search_radius + 1,
+        config.bottom_profile_y_search_step,
+    ):
+        fallback_offsets.extend(
+            [
+                -distance,
+                distance,
+            ]
+        )
+
+    primary_result = _try_bottom_profile_offsets(
+        side=side,
+        smoothed=smoothed,
+        reference_corner=reference_corner,
+        offsets=primary_offsets,
+        background_height=background_height,
+        robust_height_range=robust_height_range,
+        config=config,
+        phase_name="primary",
+    )
+
+    if primary_result is not None:
+        print(
+            f"Selected {side} bottom profile using primary search: "
+            f"reference={reference_corner.point}, "
+            f"corner={primary_result.bottom_corner}, "
+            f"offset_y="
+            f"{primary_result.bottom_corner.y - reference_y}, "
+            f"score={primary_result.transition.score:.4f}"
+        )
+        return primary_result
+
+    fallback_result = _try_bottom_profile_offsets(
+        side=side,
+        smoothed=smoothed,
+        reference_corner=reference_corner,
+        offsets=tuple(fallback_offsets),
+        background_height=background_height,
+        robust_height_range=robust_height_range,
+        config=config,
+        phase_name="fallback",
+    )
+
+    if fallback_result is None:
+        raise ValueError(
+            f"No valid {side} bottom transition was found "
+            f"around reference {reference_corner.point}, "
+            "including the exceptional-input fallback search."
+        )
+
+    print(
+        f"Selected {side} bottom profile using FALLBACK search: "
+        f"reference={reference_corner.point}, "
+        f"corner={fallback_result.bottom_corner}, "
+        f"offset_y="
+        f"{fallback_result.bottom_corner.y - reference_y}, "
+        f"score={fallback_result.transition.score:.4f}"
+    )
+
+    return fallback_result
+
+
+def _find_bottom_xpander_corner_at_y(
+    side: SideName,
+    smoothed: NDArray[np.float32],
+    reference_corner: ReferenceCorner,
+    scan_y: int,
     background_height: float,
     robust_height_range: float,
     config: XpanderSegmentationConfig,
@@ -667,11 +1734,23 @@ def _find_bottom_xpander_corner(
     """
     image_height, image_width = smoothed.shape
     reference_x = reference_corner.point.x
-    reference_y = reference_corner.point.y
+    scan_y = int(np.clip(scan_y, 0, image_height - 1))
 
-    y_min = max(0, reference_y - config.profile_band_half_width)
-    y_max = min(image_height, reference_y + config.profile_band_half_width + 1)
-    horizontal_profile = np.median(smoothed[y_min:y_max, :], axis=0)
+    bottom_half_band = (config.bottom_profile_band_half_width)
+
+    y_min = max(0, scan_y - bottom_half_band)
+    y_max = min(image_height, scan_y + bottom_half_band + 1)
+
+    horizontal_band = smoothed[y_min:y_max,:,]
+
+    # The separating marker is raised and may appear in only part of the
+    # vertical band. Median aggregation can suppress it, so use an upper
+    # percentile rather than the median.
+    horizontal_profile = np.percentile(
+        horizontal_band,
+        config.bottom_profile_band_percentile,
+        axis=0,
+    )
 
     departure = max(1, config.reference_departure_pixels)
     if side == "left":
@@ -718,7 +1797,7 @@ def _find_bottom_xpander_corner(
     return SideCornerDetection(
         side=side,
         reference_corner=reference_corner,
-        bottom_corner=PixelPoint(x=int(bottom_x), y=int(reference_y)),
+        bottom_corner=PixelPoint(x=int(bottom_x), y=int(scan_y)),
         transition=transition,
         outer_region_type=_classify_outer_region(
             outer_height=outer_height,
@@ -978,11 +2057,68 @@ def _find_top_boundary_transition(
             raised_height = float(np.max(raised_values))
             low_height = float(np.median(low_values))
 
+            plateau_background_contrast = abs(
+                stable_height - background_height
+            )
+
+            if plateau_background_contrast <= 1e-8:
+                continue
+
+            # Direction from the Xpander plateau toward the background:
+            # negative when the background is lower, positive when it is higher.
+            direction_toward_background = np.sign(
+                background_height - stable_height
+            )
+
+            progress_toward_background = float(
+                (
+                    low_height - stable_height
+                )
+                * direction_toward_background
+            )
+
+            progress_fraction = float(
+                progress_toward_background
+                / plateau_background_contrast
+            )
+
+            minimum_progress = float(
+                config.top_min_progress_toward_background_fraction
+                * plateau_background_contrast
+            )
+
+            # The post-fall region must actually move from the Xpander plateau
+            # toward the background. Local bumps that return to the same surface
+            # or remain on the opposite side of the plateau are rejected.
+            if progress_toward_background < minimum_progress:
+                continue
+
             before_std = float(np.std(before_values))
             low_std = float(np.std(low_values))
 
             initial_rise_amount = raised_height - before_height
             main_fall_amount = raised_height - low_height
+
+            # A real top boundary must leave the Xpander plateau after the fall.
+            # A local noise bump usually rises and then returns to approximately
+            # the same surface height, so it must not be accepted.
+            minimum_post_fall_drop = max(
+                config.top_post_fall_drop_min_absolute,
+                (
+                    config.top_post_fall_drop_min_fraction
+                    * robust_height_range
+                ),
+            )
+
+            post_fall_drop_from_xpander = (
+                before_height - low_height
+            )
+
+            if (
+                post_fall_drop_from_xpander
+                < minimum_post_fall_drop
+            ):
+                continue
 
             if abs(before_height - stable_height) > plateau_tolerance:
                 continue
@@ -1168,13 +2304,44 @@ def _find_top_boundary_transition(
             "the stable Xpander plateau."
         )
 
-    # Prefer the first valid boundary encountered after the stable Xpander
-    # plateau. Score resolves candidates beginning at nearly the same edge and
-    # gives a meaningful boost when optional recovery is present.
+    # Sort only for readable debugging output.
+    candidates_sorted = sorted(
+        candidates,
+        key=lambda candidate: candidate.rise_path_index,
+    )
+
+    for candidate_index, candidate in enumerate(
+        candidates_sorted,
+        start=1,
+    ):
+        print(
+            f"[{candidate_index}] "
+            f"rise_x={candidate.rise_position}, "
+            f"fall_x={candidate.fall_position}, "
+            f"rise_path_index={candidate.rise_path_index}, "
+            f"fall_path_index={candidate.fall_path_index}, "
+            f"distance_from_search_start="
+            f"{candidate.rise_path_index - search_start_index}, "
+            f"width={candidate.threshold_width_pixels}, "
+            f"before={candidate.before_height:.6f}, "
+            f"threshold={candidate.threshold_height:.6f}, "
+            f"after={candidate.after_height:.6f}, "
+            f"threshold_rise={candidate.threshold_rise:.6f}, "
+            f"rise_strength={candidate.rise_strength:.6f}, "
+            f"fall_strength={candidate.fall_strength:.6f}, "
+            f"before_std={candidate.before_std:.6f}, "
+            f"after_std={candidate.after_std:.6f}, "
+            f"score={candidate.score:.4f}"
+        )
+
+    # The algorithm first identifies the earliest valid boundary in travel order.
     first_boundary_index = min(
         candidate.rise_path_index
         for candidate in candidates
     )
+
+    # Candidates inside the same local halo/edge cluster are considered equivalent
+    # spatially. Score is used only inside this near-first group.
     near_first = [
         candidate
         for candidate in candidates
@@ -1182,10 +2349,154 @@ def _find_top_boundary_transition(
         <= first_boundary_index + config.halo_cluster_max_gap_pixels
     ]
 
-    return max(
+    print(
+        "\nFirst valid boundary:"
+        f" path_index={first_boundary_index}, "
+        f"position={int(path_positions[first_boundary_index])}"
+    )
+
+    print(
+        "Near-first acceptance range:"
+        f" path_index={first_boundary_index}:"
+        f"{first_boundary_index + config.halo_cluster_max_gap_pixels}"
+    )
+
+    print("Candidates eligible for final selection:")
+
+    for candidate in sorted(
+        near_first,
+        key=lambda item: item.rise_path_index,
+    ):
+        print(
+            f"  rise_x={candidate.rise_position}, "
+            f"path_index={candidate.rise_path_index}, "
+            f"score={candidate.score:.4f}"
+        )
+
+    selected_candidate = max(
         near_first,
         key=lambda candidate: candidate.score,
     )
+
+    print(
+        "\nSELECTED TRANSITION:"
+        f" rise_x={selected_candidate.rise_position}, "
+        f"fall_x={selected_candidate.fall_position}, "
+        f"rise_path_index={selected_candidate.rise_path_index}, "
+        f"score={selected_candidate.score:.4f}"
+    )
+
+    later_candidates = [
+        candidate
+        for candidate in candidates
+        if candidate not in near_first
+    ]
+
+    if later_candidates:
+        print("Later candidates excluded because they are not near the first edge:")
+
+        for candidate in sorted(
+            later_candidates,
+            key=lambda item: item.rise_path_index,
+        ):
+            print(
+                f"  rise_x={candidate.rise_position}, "
+                f"path_index={candidate.rise_path_index}, "
+                f"score={candidate.score:.4f}, "
+                f"distance_from_first="
+                f"{candidate.rise_path_index - first_boundary_index}"
+            )
+
+    print("=" * 90 + "\n")
+
+    print("\nALL TRANSITIONS:")
+
+    for c in candidates:
+        print(
+            f"rise={c.rise_position}, "
+            f"fall={c.fall_position}, "
+            f"score={c.score:.4f}"
+        )
+
+    print(
+        f"\nSELECTED: rise={selected_candidate.rise_position}, "
+        f"score={selected_candidate.score:.4f}"
+    )
+
+    print("\n" + "=" * 100)
+    print("TOP BOUNDARY CANDIDATES")
+    print(
+        f"stable_height={stable_height:.6f}, "
+        f"background_height={background_height:.6f}, "
+        f"initial_rise_threshold={initial_rise_threshold:.6f}, "
+        f"main_fall_threshold={main_fall_threshold:.6f}"
+    )
+
+    ordered_candidates = sorted(
+        candidates,
+        key=lambda candidate: candidate.rise_path_index,
+    )
+
+    for index, candidate in enumerate(
+        ordered_candidates,
+        start=1,
+    ):
+        post_fall_drop = (
+            candidate.before_height
+            - candidate.threshold_height
+        )
+
+        print(
+            f"[{index}] "
+            f"rise_y={candidate.rise_position}, "
+            f"validation_fall_y="
+            f"{candidate.validation_fall_position}, "
+            f"recovery_y="
+            f"{candidate.validation_recovery_position}, "
+            f"path_index={candidate.rise_path_index}, "
+            f"gap={candidate.threshold_width_pixels}, "
+            f"before={candidate.before_height:.6f}, "
+            f"low={candidate.threshold_height:.6f}, "
+            f"after={candidate.after_height:.6f}, "
+            f"post_fall_drop={post_fall_drop:.6f}, "
+            f"rise_strength={candidate.rise_strength:.6f}, "
+            f"fall_strength={candidate.fall_strength:.6f}, "
+            f"low_std={candidate.after_std:.6f}, "
+            f"score={candidate.score:.4f}"
+        )
+
+    first_boundary_index = min(
+        candidate.rise_path_index
+        for candidate in candidates
+    )
+
+    near_first = [
+        candidate
+        for candidate in candidates
+        if candidate.rise_path_index
+        <= (
+            first_boundary_index
+            + config.halo_cluster_max_gap_pixels
+        )
+    ]
+
+    selected = max(
+        near_first,
+        key=lambda candidate: candidate.score,
+    )
+
+    print(
+        "\nSELECTED TOP BOUNDARY: "
+        f"rise_y={selected.rise_position}, "
+        f"fall_y={selected.validation_fall_position}, "
+        f"score={selected.score:.4f}, "
+        f"first_path_index={first_boundary_index}, "
+        f"near_first_limit="
+        f"{first_boundary_index + config.halo_cluster_max_gap_pixels}"
+    )
+    print("=" * 100 + "\n")
+
+    return selected_candidate
 
 def _find_stable_plateau(
     profile: NDArray[np.float64],
@@ -1427,6 +2738,14 @@ def _find_raised_threshold_transition(
                     threshold_rise=threshold_rise,
                     score=score,
                 )
+            )
+
+            candidate = candidates[-1]
+            print(
+                f"ADD TRANSITION: "
+                f"rise={candidate.rise_position}, "
+                f"fall={candidate.fall_position}, "
+                f"score={candidate.score:.4f}"
             )
 
     if not candidates:
@@ -1722,6 +3041,58 @@ def _calculate_geometry_score(
     return float((alignment_score + width_score + height_score) / 3.0)
 
 
+def _show_detected_xpander_corners(
+    height_map: FloatArray,
+    pivot_box: BoundingBox,
+    detected_corners: list[tuple[str, PixelPoint]],
+    title: str,
+) -> None:
+    """Unconditionally show every Xpander point detected so far."""
+    figure, axis = plt.subplots(figsize=(10, 8))
+    image = axis.imshow(height_map, aspect="auto", interpolation="nearest")
+    figure.colorbar(image, ax=axis, label="Height")
+
+    axis.add_patch(
+        Rectangle(
+            (pivot_box.x_min, pivot_box.y_min),
+            pivot_box.width,
+            pivot_box.height,
+            fill=False,
+            edgecolor="white",
+            linestyle="--",
+            linewidth=1.2,
+            label="Pivot",
+        )
+    )
+
+    for index, (label, point) in enumerate(detected_corners):
+        newest = index == len(detected_corners) - 1
+        color = "red" if newest else "cyan"
+        axis.scatter(
+            point.x,
+            point.y,
+            color=color,
+            marker="x",
+            s=90 if newest else 55,
+            linewidths=2.0 if newest else 1.4,
+            label=f"{label}: ({point.x}, {point.y})",
+        )
+        axis.text(
+            point.x + 5,
+            point.y - 5,
+            f"{label}\n({point.x}, {point.y})",
+            color=color,
+            fontsize=9,
+        )
+
+    axis.set_title(title)
+    axis.set_xlabel("X [pixels]")
+    axis.set_ylabel("Y [pixels]")
+    axis.legend(loc="best")
+    figure.tight_layout()
+    plt.show()
+
+
 def print_xpander_segmentation(result: XpanderSegmentationResult) -> None:
     """Print Stage-6 geometry, directions, halo handling and scores."""
     print("\nXpander segmentation:")
@@ -1961,12 +3332,15 @@ def get_xpander_segmentation(
     pivot_segmentation: PivotSegmentationResult,
     print_debug: bool = False,
     show_debug: bool = False,
+    show_corner_debug: bool = False,
 ) -> XpanderSegmentationResult:
-    """Run Step 6 and optionally print or display its diagnostics."""
-    segmentation_result = segment_xpander(
-        height_map=height_map,
-        pivot_segmentation=pivot_segmentation,
-    )
+    """Run Step 6 through the same wrapper interface as the other stages."""
+    with debug_print_context(print_debug):
+        segmentation_result = segment_xpander(
+            height_map=height_map,
+            pivot_segmentation=pivot_segmentation,
+            show_corner_debug=show_corner_debug,
+        )
 
     if print_debug:
         print_xpander_segmentation(segmentation_result)

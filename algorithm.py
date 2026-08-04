@@ -38,6 +38,7 @@ def analyze_height_map(
     input_file_name: str | None = None,
     print_debug: bool = False,
     show_debug: bool = False,
+    show_corner_debug: bool = False,
     summary_plot: bool = False,
     summary_output_path: str | Path | None = None,
     show_summary_on_failure: bool = True,
@@ -144,6 +145,7 @@ def analyze_height_map(
             pivot_segmentation=pivot_segmentation,
             print_debug=print_debug,
             show_debug=show_debug,
+            show_corner_debug=show_corner_debug,
         )
         completed_stages.append(current_stage)
 
@@ -162,10 +164,11 @@ def analyze_height_map(
         failure_message = str(error)
         caught_error = error
 
-        print(
-            f"Analysis stopped at {failed_stage}: "
-            f"{failure_message}"
-        )
+        if print_debug:
+            print(
+                f"Analysis stopped at {failed_stage}: "
+                f"{failure_message}"
+            )
 
     cross_centers = _collect_cross_centers(
         lower_cross_detection=lower_cross_detection,

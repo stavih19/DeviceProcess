@@ -76,6 +76,20 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--show-corner-debug",
+        "--corner-debug",
+        dest="show_corner_debug",
+        type=parse_bool,
+        nargs="?",
+        const=True,
+        default=False,
+        metavar="BOOL",
+        help=(
+            "Display Step 6's six incremental Xpander-corner plots. "
+            "Accepts true/false; using the option without a value means true."
+        ),
+    )
+    parser.add_argument(
         "--summary-plot",
         "--summery-plot",
         dest="summary_plot",
@@ -189,6 +203,7 @@ def main() -> int:
                 input_file_name=input_file.name,
                 print_debug=args.print_debug,
                 show_debug=args.show_debug,
+                show_corner_debug=args.show_corner_debug,
                 summary_plot=args.summary_plot,
             )
 

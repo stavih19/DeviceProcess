@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from AlgoSteps.debug_utils import debug_print_context
+
 from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
@@ -651,13 +653,14 @@ def get_pivot_plane_height_difference(
     show_debug: bool = False,
 ) -> PivotPlaneHeightDifferenceResult:
     """Measure the Pivot plane heights and optionally display the debug plot."""
-    measurement_result = measure_pivot_plane_height_difference(
-        height_map=height_map,
-        lower_plane_detection=lower_plane_detection,
-        lower_cross_detection=lower_cross_detection,
-        pivot_segmentation=pivot_segmentation,
-        upper_cross_detection=upper_cross_detection,
-    )
+    with debug_print_context(print_debug):
+        measurement_result = measure_pivot_plane_height_difference(
+            height_map=height_map,
+            lower_plane_detection=lower_plane_detection,
+            lower_cross_detection=lower_cross_detection,
+            pivot_segmentation=pivot_segmentation,
+            upper_cross_detection=upper_cross_detection,
+        )
 
     if print_debug:
         print_pivot_plane_height_difference(measurement_result)

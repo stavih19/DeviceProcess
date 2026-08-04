@@ -902,6 +902,8 @@
 
 from __future__ import annotations
 
+from AlgoSteps.debug_utils import debug_print_context
+
 from dataclasses import dataclass, field
 
 import matplotlib.pyplot as plt
@@ -1522,11 +1524,12 @@ def get_lower_cross_detection(
             "Lower-cross detection requires a valid lower-plane candidate."
         )
 
-    detection_result = find_lower_cross_candidates(
-        height_map=height_map,
-        lower_plane_detection=lower_plane_detection,
-        lower_plane_candidate=best_plane,
-    )
+    with debug_print_context(print_debug):
+        detection_result = find_lower_cross_candidates(
+            height_map=height_map,
+            lower_plane_detection=lower_plane_detection,
+            lower_plane_candidate=best_plane,
+        )
 
     if detection_result.best_candidate is None:
         raise ValueError("No lower Pivot cross candidate was found.")

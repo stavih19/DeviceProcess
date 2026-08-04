@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from AlgoSteps.debug_utils import debug_print_context
+
 from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
@@ -682,11 +684,12 @@ def get_pivot_segmentation(
     show_debug: bool = False,
 ) -> PivotSegmentationResult:
     """Segment the Pivot and optionally display its debug plot."""
-    segmentation_result = segment_pivot(
-        height_map=height_map,
-        lower_plane_detection=lower_plane_detection,
-        lower_cross_detection=lower_cross_detection,
-    )
+    with debug_print_context(print_debug):
+        segmentation_result = segment_pivot(
+            height_map=height_map,
+            lower_plane_detection=lower_plane_detection,
+            lower_cross_detection=lower_cross_detection,
+        )
 
     if print_debug:
         print_pivot_segmentation(segmentation_result)
