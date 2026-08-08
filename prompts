@@ -159,3 +159,116 @@ Fit errors and quality scores.
 Accepted and rejected profiles.
 Overall confidence and a low-confidence flag.
 Print the final radii and fit-quality measurements. Display a debug plot showing the selected central profiles, the X–Z and Y–Z height profiles, and the fitted circular arcs.
+
+# Robustness / Edge-Case Refinement:
+After testing the pipeline on multiple additional .npy inputs, improve the implementation to handle cases where individual stages fail or select locally strong but geometrically incorrect candidates.
+Do not solve these cases with hardcoded coordinates or file-specific conditions. All corrections must generalize across inputs and use configurable, soft scoring whenever possible.
+
+Stage 0 – Alignment Correction:
+Add a preprocessing stage for Task 2 inputs that may contain small tilt or in-plane rotation.
+Estimate and correct global X/Y tilt from background regions.
+Estimate the dominant in-plane rotation and rotate the height map back to the aligned orientation.
+Keep the corrected image shape identical to the original input shape.
+Report measured and applied tilt/rotation values and residual alignment errors.
+Do not apply unnecessary correction when the estimated misalignment is negligible.
+The corrected height map must then pass through the same Stage 1–7 pipeline.
+
+Stage 3 – Pivot Boundary Robustness:
+Do not select the four Pivot boundaries independently.
+Keep several candidates for each side and jointly evaluate complete four-boundary combinations using:
+Local edge strength.
+Expected inside height.
+Outside height consistency.
+Height-step consistency.
+Geometric validity.
+Use soft consistency scores and robust tolerances rather than exact equality.
+
+Stage 6 – Xpander Reference-Corner Robustness:
+Improve side-wall and reference-corner detection after failures caused by strong neighboring components.
+Do not reject a wall simply because another distant edge is stronger.
+Rank wall clusters using a soft combination of edge strength and distance from the Pivot.
+Use percentile-based strength normalization so a single extreme edge does not dominate all candidates.
+Keep multiple wall and reference-corner candidates for later validation.
+Preserve top_search_start_gap_pixels = 4; do not compensate for incorrect lower-corner selection by artificially increasing the top-search gap.
+
+Stage 6 – Bottom-Corner Multi-Hypothesis Search:
+Do not immediately choose the highest-scoring horizontal profile around each reference corner.
+For every reference corner:
+Search several nearby Y rows.
+Keep multiple valid bottom-corner hypotheses instead of returning only the locally best one.
+Apply a small configurable penalty for Y distance from the reference corner.
+Use a wider fallback Y search only when the normal nearby search produces no valid candidates.
+This is required because the strongest local transition may correspond to an internal separator edge rather than the actual Xpander boundary.
+
+Stage 6 – Joint Left/Right Pair Selection:
+Do not select the left side first and then force the right side to match it.
+Collect several valid (reference corner, bottom corner) hypotheses for both sides and evaluate all valid left/right combinations jointly.
+Score every pair using:
+Mean bottom-transition quality.
+Mean reference-corner quality.
+Reference-corner Y alignment.
+Bottom-corner Y alignment.
+Soft symmetry of the outward distances from the references.
+Xpander surface-height plausibility.
+Keep outward-distance symmetry as weak evidence only. A pair of neighboring-component boundaries may be highly symmetric while still being incorrect.
+
+Stage 6 – Surface-Height Consistency:
+Use the Pivot outside-wall heights as an estimate of the expected Xpander surface height.
+Estimate the expected height from the median of the left, right and top Pivot outside heights.
+For every bottom-corner hypothesis:
+Compare its measured Xpander plateau height with the expected Xpander surface height.
+Use a tolerance band rather than requiring an exact match.
+Penalize only substantial disagreement.
+Also report the difference between the left and right detected Xpander surface heights.
+This should reject cases where one side detects a false plateau, for example when one side is near the real Xpander surface and the other is several height units lower.
+
+Stage 6 – Top-Boundary Validation:
+Improve the upper-boundary transition validation.
+After establishing the stable Xpander surface, require the detected pattern to show meaningful progress away from the Xpander plateau toward the outside/background region.
+The sequence should remain:
+Stable Xpander surface.
+Initial small rise defining the Xpander boundary.
+Stronger fall.
+Optional recovery rise.
+Reject small local bumps that return to approximately the same Xpander surface instead of progressing toward the outside region.
+Debugging and Candidate Reporting
+
+For difficult inputs, preserve enough information to understand why a candidate was selected:
+Print:
+Ranked wall candidates.
+Ranked reference-corner candidates.
+All valid bottom-row hypotheses.
+Left and right outward distances.
+Surface heights and surface-height differences.
+Y-alignment scores.
+Outward-distance symmetry score.
+Final score for each left/right pair.
+The final selected pair.
+The purpose is to make failures diagnosable from the logs without relying only on the visualization.
+Regression Validation
+Add a separate regression-testing script.
+For each previously verified input:
+Save the accepted output as a baseline.
+After every algorithm change, rerun the pipeline.
+Compare Pivot/Xpander masks, cross centers, Pivot height difference, curvature radii and fit scores against the baseline.
+Report PASS, WARN or FAIL.
+Do not update the baseline automatically after a failure; update it only after the new result has been visually verified.
+Output Plausibility Validation
+Add another script that validates already-generated output files without rerunning the algorithm.
+Read each input's result.json and labels.npy from the output directory and check whether the result is physically/geometrically plausible.
+Include checks such as:
+Pivot width/height ratio.
+Xpander width/height ratio.
+Xpander-to-Pivot width ratio.
+Xpander-to-Pivot height ratio.
+Horizontal difference between the two Pivot cross centers.
+Vertical cross separation relative to Pivot height.
+Cross alignment with the Pivot center.
+Xpander and Pivot center alignment.
+Left/right Xpander extension symmetry.
+Pivot height difference.
+X/Y curvature-radius ranges and their ratio.
+Curvature fit scores.
+Presence and connectivity of Pivot and Xpander labels.
+Return PASS, WARN or FAIL for each check and an overall status for every processed input.
+All tolerances must remain configurable and should preferably be derived from verified baseline data rather than hardcoded for a single file.

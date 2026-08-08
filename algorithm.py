@@ -29,6 +29,9 @@ from AlgoSteps.step6_xpander_segmentation_v4 import (
 from analysis_summary_plot_partial import (
     plot_analysis_summary,
 )
+from AlgoSteps.step0_alignment import (
+    get_alignment_correction,
+)
 from models import Point2D, RawAnalysisResult
 
 
@@ -54,8 +57,9 @@ def analyze_height_map(
     - a partial RawAnalysisResult is returned;
     - the original exception is re-raised only when raise_on_failure=True.
     """
-    del pixel_size_um  # Stage 7 currently uses the assignment's 0.252 μm pitch.
+    # del pixel_size_um  # Stage 7 currently uses the assignment's 0.252 μm pitch.
 
+    alignment_result: Any | None = None
     lower_plane_detection: Any | None = None
     lower_cross_detection: Any | None = None
     pivot_segmentation: Any | None = None
@@ -79,6 +83,17 @@ def analyze_height_map(
     # 7. Measure the Xpander radius of curvature.
 
     try:
+        current_stage = "Stage 0 — alignment correction"
+        alignment_result = get_alignment_correction(
+            height_map=height_map,
+            pixel_size_um=pixel_size_um,
+            print_debug=print_debug,
+            show_debug=show_debug,
+        )
+        completed_stages.append(current_stage)
+
+        height_map = alignment_result.corrected_height_map
+
         # Stage 1: detect the lower Pivot plane.
         current_stage = "Stage 1 — lower Pivot plane"
         lower_plane_detection = get_lower_plane_detection(
@@ -190,6 +205,7 @@ def analyze_height_map(
     if should_create_summary:
         plot_analysis_summary(
             height_map=height_map,
+            alignment_result=alignment_result,
             lower_plane_detection=lower_plane_detection,
             lower_cross_detection=lower_cross_detection,
             pivot_segmentation=pivot_segmentation,
@@ -211,17 +227,31 @@ def analyze_height_map(
             ),
         )
 
+    pivot_bounding_box = _collect_bounding_box_points(
+        pivot_segmentation
+    )
+
+    xpander_bounding_box = _collect_bounding_box_points(
+        xpander_segmentation
+    )
+
     result = RawAnalysisResult(
         status=(
             "completed"
             if failed_stage is None
             else f"failed: {failed_stage}"
         ),
+
+        pivot_bounding_box_px=pivot_bounding_box,
+        xpander_bounding_box_px=xpander_bounding_box,
+
         pivot_height_difference_um=_optional_float(
             pivot_height_result,
             "height_difference",
         ),
+
         pivot_cross_centers_px=cross_centers,
+
         xpander_radius_x_um=_optional_float(
             xpander_curvature,
             "radius_x_um",
@@ -230,6 +260,7 @@ def analyze_height_map(
             xpander_curvature,
             "radius_y_um",
         ),
+
         radius_fit_score_x=_nested_optional_float(
             xpander_curvature,
             "x_axis",
@@ -244,6 +275,20 @@ def analyze_height_map(
             xpander_curvature,
             "confidence",
         ),
+
+        tilt_x_deg=_optional_float(
+            alignment_result,
+            "applied_tilt_x_degrees",
+        ),
+        tilt_y_deg=_optional_float(
+            alignment_result,
+            "applied_tilt_y_degrees",
+        ),
+        rotation_deg=_optional_float(
+            alignment_result,
+            "applied_rotation_degrees",
+        ),
+
         label_map=final_label_map,
     )
 
@@ -362,3 +407,24 @@ def _nested_optional_float(
         nested_result,
         value_attribute_name,
     )
+
+
+def _collect_bounding_box_points(
+    segmentation: Any | None,
+) -> list[Point2D]:
+    if segmentation is None:
+        return []
+
+    bounding_box = getattr(
+        segmentation,
+        "bounding_box",
+        None,
+    )
+
+    if bounding_box is None:
+        return []
+
+    return [
+        Point2D(x=float(x), y=float(y))
+        for x, y in bounding_box.corners
+    ]

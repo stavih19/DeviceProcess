@@ -19,7 +19,7 @@ FloatArray = NDArray[np.floating]
 class AnalysisSummaryPlotConfig:
     """Configuration for the final or partial analysis-summary plot."""
 
-    figure_size: tuple[float, float] = (16.0, 9.5)
+    figure_size: tuple[float, float] = (22.0, 10.5)
     colormap: str = "viridis"
 
     bounding_box_line_width: float = 1.0
@@ -30,7 +30,7 @@ class AnalysisSummaryPlotConfig:
     cross_center_size: float = 42.0
 
     annotation_font_size: float = 8.5
-    side_text_font_size: float = 9.0
+    side_text_font_size: float = 8.3
     title_font_size: float = 13.0
 
     lower_plane_color: str = "white"
@@ -41,14 +41,16 @@ class AnalysisSummaryPlotConfig:
     measurement_color: str = "white"
     failure_color: str = "orangered"
 
-    right_panel_x: float = 0.735
-    plot_right_margin: float = 0.70
+    right_panel_x: float = 0.52
+    right_panel_second_x: float = 0.765
+    plot_right_margin: float = 0.48
     save_dpi: int = 180
 
 
 def plot_analysis_summary(
     *,
     height_map: FloatArray,
+    alignment_result: Any | None = None,
     lower_plane_detection: Any | None = None,
     lower_cross_detection: Any | None = None,
     pivot_segmentation: Any | None = None,
@@ -297,6 +299,7 @@ def plot_analysis_summary(
     axis.set_ylabel("Y coordinate (pixel)")
 
     side_text = _build_side_text(
+        alignment_result=alignment_result,
         lower_plane_detection=lower_plane_detection,
         lower_cross_detection=lower_cross_detection,
         pivot_segmentation=pivot_segmentation,
@@ -308,16 +311,22 @@ def plot_analysis_summary(
         failed_stage=failed_stage,
         failure_message=failure_message,
     )
-    figure.text(
-        config.right_panel_x,
-        0.94,
-        side_text,
-        va="top",
-        ha="left",
-        fontsize=config.side_text_font_size,
-        family="monospace",
-        linespacing=1.20,
-    )
+    side_text_columns = _split_side_text_into_columns(side_text)
+    for column_x, column_text in zip(
+        (config.right_panel_x, config.right_panel_second_x),
+        side_text_columns,
+        strict=True,
+    ):
+        figure.text(
+            column_x,
+            0.96,
+            column_text,
+            va="top",
+            ha="left",
+            fontsize=config.side_text_font_size,
+            family="monospace",
+            linespacing=1.15,
+        )
 
     if legend_items:
         used: set[str] = set()
@@ -372,6 +381,7 @@ def plot_analysis_summary(
 
 def _build_side_text(
     *,
+    alignment_result: Any | None,
     lower_plane_detection: Any | None,
     lower_cross_detection: Any | None,
     pivot_segmentation: Any | None,
@@ -397,6 +407,68 @@ def _build_side_text(
         lines.append("")
         lines.append("COMPLETED STAGES")
         lines.extend(f"✓ {stage}" for stage in completed_stages)
+
+    lines.extend(["", "ALIGNMENT CORRECTION (STEP 0)"])
+    if alignment_result is None:
+        lines.append("not available")
+    else:
+        raw_plane = getattr(alignment_result, "raw_plane", None)
+        raw_rotation = getattr(alignment_result, "raw_rotation", None)
+
+        measured_tilt_x = getattr(raw_plane, "tilt_x_degrees", 0.0)
+        measured_tilt_y = getattr(raw_plane, "tilt_y_degrees", 0.0)
+        measured_rotation = getattr(raw_rotation, "angle_degrees", 0.0)
+
+        applied_tilt_x = getattr(
+            alignment_result,
+            "applied_tilt_x_degrees",
+            0.0,
+        )
+        applied_tilt_y = getattr(
+            alignment_result,
+            "applied_tilt_y_degrees",
+            0.0,
+        )
+        applied_tilt_total = getattr(
+            alignment_result,
+            "applied_tilt_total_degrees",
+            0.0,
+        )
+        applied_residual_tilt = getattr(
+            alignment_result,
+            "applied_residual_tilt_degrees",
+            0.0,
+        )
+        applied_rotation = getattr(
+            alignment_result,
+            "applied_rotation_degrees",
+            0.0,
+        )
+
+        lines.append(
+            "measured tilt: "
+            f"X={float(measured_tilt_x):.6f}°, "
+            f"Y={float(measured_tilt_y):.6f}°"
+        )
+        lines.append(
+            "applied tilt:  "
+            f"X={float(applied_tilt_x):.6f}°, "
+            f"Y={float(applied_tilt_y):.6f}°"
+        )
+        lines.append(
+            f"applied tilt total: {float(applied_tilt_total):.6f}°"
+        )
+        lines.append(
+            "applied residual tilt: "
+            f"{float(applied_residual_tilt):.6f}°"
+        )
+        lines.append(
+            f"measured rotation: {float(measured_rotation):.6f}°"
+        )
+        lines.append(
+            f"applied rotation:  {float(applied_rotation):.6f}°"
+        )
+        lines.append("0.000000° = no correction applied")
 
     lower_plane = _best_candidate(lower_plane_detection)
     lower_cross = _best_candidate(lower_cross_detection)
@@ -501,6 +573,37 @@ def _build_side_text(
             lines.append(f"overall: {float(confidence):.4f}")
 
     return "\n".join(lines)
+
+
+def _split_side_text_into_columns(side_text: str) -> tuple[str, str]:
+    """Split ordered summary sections into two balanced text columns."""
+    sections = side_text.split("\n\n")
+    section_line_counts = [section.count("\n") + 1 for section in sections]
+    target_lines = (sum(section_line_counts) + 1) // 2
+
+    first_column: list[str] = []
+    second_column: list[str] = []
+    first_column_lines = 0
+
+    for section, line_count in zip(
+        sections,
+        section_line_counts,
+        strict=True,
+    ):
+        if first_column and first_column_lines + line_count > target_lines:
+            second_column.append(section)
+        elif second_column:
+            second_column.append(section)
+        else:
+            first_column.append(section)
+            first_column_lines += line_count
+
+    # The summary normally has many sections. Keep the helper safe for a very
+    # short partial result by moving its last section into column two.
+    if not second_column and len(first_column) > 1:
+        second_column.append(first_column.pop())
+
+    return "\n\n".join(first_column), "\n\n".join(second_column)
 
 
 def _cross_side_lines(

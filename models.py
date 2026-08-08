@@ -35,6 +35,8 @@ class RawAnalysisResult:
     status: AnalysisStatus
 
     # Task 1 and Task 2 measurements
+    pivot_bounding_box_px: list[Point2D] = field(default_factory=list)
+    xpander_bounding_box_px: list[Point2D] = field(default_factory=list)
     pivot_height_difference_um: float | None = None
     pivot_cross_centers_px: list[Point2D] = field(default_factory=list)
 
@@ -79,6 +81,9 @@ class AnalysisResult:
 
     input_file_name: str
     status: AnalysisStatus
+
+    pivot_bounding_box_px: list[Point2D]
+    xpander_bounding_box_px: list[Point2D]
 
     pivot_height_difference_um: float | None
     pivot_cross_centers_px: list[Point2D]

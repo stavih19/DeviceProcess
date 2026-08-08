@@ -1,0 +1,5 @@
+analyze py file by directorye: python -B main.py   ./Teramount_Home_Assignment/15_files_task_1   --output-dir ./outputs/task1   --print-debug False   --show-debug True   --summary-plot True
+analyze py file by directory or single file: python -B main.py   ./Teramount_Home_Assignment/15_files_task_1/0.npy   --output-dir ./outputs/task1   --print-debug False   --show-debug True   --summary-plot True
+create base line(after visual check): python -B regression_runner.py     ./Teramount_Home_Assignment/15_files_task_1     --baseline-dir ./regression_baselines/task1     --update-baseline
+test the result: python -B regression_runner.py     ./Teramount_Home_Assignment/15_files_task_1     --baseline-dir ./regression_baselines/task1
+test results: python -B output_plausibility_check.py ./outputs/task1 --show-passes --csv-report ./outputs/task1/plausibility_report_task1.csv

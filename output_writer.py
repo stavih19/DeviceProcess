@@ -96,6 +96,8 @@ def save_result_files(
     result = AnalysisResult(
         input_file_name=input_file_name,
         status=raw_result.status,
+        pivot_bounding_box_px=raw_result.pivot_bounding_box_px,
+        xpander_bounding_box_px=raw_result.xpander_bounding_box_px,
         pivot_height_difference_um=raw_result.pivot_height_difference_um,
         pivot_cross_centers_px=raw_result.pivot_cross_centers_px,
         xpander_radius_x_um=raw_result.xpander_radius_x_um,
@@ -121,7 +123,14 @@ def save_batch_summary(
     output_root: Path,
 ) -> None:
     """Save aggregate JSON and CSV files for all processed inputs."""
-    with (output_root / "results.json").open("w", encoding="utf-8") as file:
+
+    # ------------------------------------------------------------------
+    # Aggregate JSON
+    # ------------------------------------------------------------------
+    with (output_root / "results.json").open(
+        "w",
+        encoding="utf-8",
+    ) as file:
         json.dump(
             [asdict(result) for result in results],
             file,
@@ -129,67 +138,262 @@ def save_batch_summary(
             ensure_ascii=False,
         )
 
+    # ------------------------------------------------------------------
+    # Aggregate CSV
+    # ------------------------------------------------------------------
     with (output_root / "results.csv").open(
         "w",
         newline="",
         encoding="utf-8",
     ) as file:
+
         field_names = [
             "input_file_name",
             "status",
+
+            # Pivot bounding box:
+            # TL -> TR -> BR -> BL
+            "pivot_tl_x_px",
+            "pivot_tl_y_px",
+            "pivot_tr_x_px",
+            "pivot_tr_y_px",
+            "pivot_br_x_px",
+            "pivot_br_y_px",
+            "pivot_bl_x_px",
+            "pivot_bl_y_px",
+
+            # Xpander bounding box:
+            # TL -> TR -> BR -> BL
+            "xpander_tl_x_px",
+            "xpander_tl_y_px",
+            "xpander_tr_x_px",
+            "xpander_tr_y_px",
+            "xpander_br_x_px",
+            "xpander_br_y_px",
+            "xpander_bl_x_px",
+            "xpander_bl_y_px",
+
+            # Pivot measurements
             "pivot_height_difference_um",
-            "upper_cross_x_px",
-            "upper_cross_y_px",
+
+            # Cross centres
             "lower_cross_x_px",
             "lower_cross_y_px",
+            "upper_cross_x_px",
+            "upper_cross_y_px",
+
+            # Xpander curvature
             "xpander_radius_x_um",
             "xpander_radius_y_um",
+
+            # Fit quality
             "radius_fit_score_x",
             "radius_fit_score_y",
             "radius_fit_score_overall",
+
+            # Alignment correction
             "tilt_x_deg",
             "tilt_y_deg",
             "rotation_deg",
+
+            # Fault information
             "faulty_elements",
             "fault_reasons",
+
+            # Generated files
             "result_json",
             "label_map_npy",
             "label_image_png",
         ]
 
-        writer = csv.DictWriter(file, fieldnames=field_names)
+        writer = csv.DictWriter(
+            file,
+            fieldnames=field_names,
+        )
         writer.writeheader()
 
         for result in results:
+
+            # ----------------------------------------------------------
+            # Cross centres
+            #
+            # algorithm.py stores them in this order:
+            #   [lower_cross, upper_cross]
+            # ----------------------------------------------------------
             crosses = result.pivot_cross_centers_px
-            upper_cross = crosses[0] if len(crosses) > 0 else None
-            lower_cross = crosses[1] if len(crosses) > 1 else None
+
+            lower_cross = (
+                crosses[0]
+                if len(crosses) > 0
+                else None
+            )
+
+            upper_cross = (
+                crosses[1]
+                if len(crosses) > 1
+                else None
+            )
+
+            # ----------------------------------------------------------
+            # Pivot bounding box
+            #
+            # Expected order:
+            #   0 = top-left
+            #   1 = top-right
+            #   2 = bottom-right
+            #   3 = bottom-left
+            # ----------------------------------------------------------
+            pivot_box = result.pivot_bounding_box_px
+
+            pivot_tl = (
+                pivot_box[0]
+                if len(pivot_box) > 0
+                else None
+            )
+            pivot_tr = (
+                pivot_box[1]
+                if len(pivot_box) > 1
+                else None
+            )
+            pivot_br = (
+                pivot_box[2]
+                if len(pivot_box) > 2
+                else None
+            )
+            pivot_bl = (
+                pivot_box[3]
+                if len(pivot_box) > 3
+                else None
+            )
+
+            # ----------------------------------------------------------
+            # Xpander bounding box
+            #
+            # Expected order:
+            #   0 = top-left
+            #   1 = top-right
+            #   2 = bottom-right
+            #   3 = bottom-left
+            # ----------------------------------------------------------
+            xpander_box = result.xpander_bounding_box_px
+
+            xpander_tl = (
+                xpander_box[0]
+                if len(xpander_box) > 0
+                else None
+            )
+            xpander_tr = (
+                xpander_box[1]
+                if len(xpander_box) > 1
+                else None
+            )
+            xpander_br = (
+                xpander_box[2]
+                if len(xpander_box) > 2
+                else None
+            )
+            xpander_bl = (
+                xpander_box[3]
+                if len(xpander_box) > 3
+                else None
+            )
 
             writer.writerow(
                 {
-                    "input_file_name": result.input_file_name,
-                    "status": result.status,
-                    "pivot_height_difference_um": result.pivot_height_difference_um,
-                    "upper_cross_x_px": upper_cross.x if upper_cross else None,
-                    "upper_cross_y_px": upper_cross.y if upper_cross else None,
-                    "lower_cross_x_px": lower_cross.x if lower_cross else None,
-                    "lower_cross_y_px": lower_cross.y if lower_cross else None,
-                    "xpander_radius_x_um": result.xpander_radius_x_um,
-                    "xpander_radius_y_um": result.xpander_radius_y_um,
-                    "radius_fit_score_x": result.radius_fit_score_x,
-                    "radius_fit_score_y": result.radius_fit_score_y,
-                    "radius_fit_score_overall": result.radius_fit_score_overall,
-                    "tilt_x_deg": result.tilt_x_deg,
-                    "tilt_y_deg": result.tilt_y_deg,
-                    "rotation_deg": result.rotation_deg,
+                    "input_file_name":
+                        result.input_file_name,
+
+                    "status":
+                        result.status,
+
+                    # Pivot BB
+                    "pivot_tl_x_px":
+                        pivot_tl.x if pivot_tl else None,
+                    "pivot_tl_y_px":
+                        pivot_tl.y if pivot_tl else None,
+
+                    "pivot_tr_x_px":
+                        pivot_tr.x if pivot_tr else None,
+                    "pivot_tr_y_px":
+                        pivot_tr.y if pivot_tr else None,
+
+                    "pivot_br_x_px":
+                        pivot_br.x if pivot_br else None,
+                    "pivot_br_y_px":
+                        pivot_br.y if pivot_br else None,
+
+                    "pivot_bl_x_px":
+                        pivot_bl.x if pivot_bl else None,
+                    "pivot_bl_y_px":
+                        pivot_bl.y if pivot_bl else None,
+
+                    # Xpander BB
+                    "xpander_tl_x_px":
+                        xpander_tl.x if xpander_tl else None,
+                    "xpander_tl_y_px":
+                        xpander_tl.y if xpander_tl else None,
+
+                    "xpander_tr_x_px":
+                        xpander_tr.x if xpander_tr else None,
+                    "xpander_tr_y_px":
+                        xpander_tr.y if xpander_tr else None,
+
+                    "xpander_br_x_px":
+                        xpander_br.x if xpander_br else None,
+                    "xpander_br_y_px":
+                        xpander_br.y if xpander_br else None,
+
+                    "xpander_bl_x_px":
+                        xpander_bl.x if xpander_bl else None,
+                    "xpander_bl_y_px":
+                        xpander_bl.y if xpander_bl else None,
+
+                    # Pivot measurement
+                    "pivot_height_difference_um":
+                        result.pivot_height_difference_um,
+
+                    # Crosses
+                    "lower_cross_x_px":
+                        lower_cross.x if lower_cross else None,
+                    "lower_cross_y_px":
+                        lower_cross.y if lower_cross else None,
+
+                    "upper_cross_x_px":
+                        upper_cross.x if upper_cross else None,
+                    "upper_cross_y_px":
+                        upper_cross.y if upper_cross else None,
+
+                    # Curvature
+                    "xpander_radius_x_um":
+                        result.xpander_radius_x_um,
+                    "xpander_radius_y_um":
+                        result.xpander_radius_y_um,
+
+                    # Fit scores
+                    "radius_fit_score_x":
+                        result.radius_fit_score_x,
+                    "radius_fit_score_y":
+                        result.radius_fit_score_y,
+                    "radius_fit_score_overall":
+                        result.radius_fit_score_overall,
+
+                    # Alignment
+                    "tilt_x_deg":
+                        result.tilt_x_deg,
+                    "tilt_y_deg":
+                        result.tilt_y_deg,
+                    "rotation_deg":
+                        result.rotation_deg,
+
+                    # Faults
                     "faulty_elements": "; ".join(
-                        fault.element for fault in result.faults
+                        fault.element
+                        for fault in result.faults
                     ),
+
                     "fault_reasons": "; ".join(
-                        fault.reason for fault in result.faults
+                        fault.reason
+                        for fault in result.faults
                     ),
-                    "result_json": result.output_files.result_json,
-                    "label_map_npy": result.output_files.label_map_npy,
-                    "label_image_png": result.output_files.label_image_png,
                 }
             )

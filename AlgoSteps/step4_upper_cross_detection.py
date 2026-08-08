@@ -40,7 +40,7 @@ class UpperCrossDetectionConfig:
 
     # Morphological cleanup.
     opening_size: int = 1
-    closing_size: int = 3
+    closing_size: int = 1
 
     # Exclude the outer Pivot walls and the transition near the lower plane.
     pivot_edge_margin_fraction: float = 0.04
