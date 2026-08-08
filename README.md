@@ -2,6 +2,71 @@
 
 This project analyzes 2-D NumPy height maps (`.npy`) and extracts the required Pivot and Xpander measurements.
 
+## Installation
+
+### Requirements
+
+- Python **3.10 or newer**
+- `pip`
+- Recommended: a Python virtual environment
+
+The project uses the following external Python packages:
+
+```text
+numpy
+scipy
+matplotlib
+Pillow
+```
+
+### Ubuntu / Debian
+
+Install Python, `pip`, and virtual-environment support if they are not already installed:
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-pip python3-venv
+```
+
+From the project root, create and activate a virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Upgrade `pip`:
+
+```bash
+python -m pip install --upgrade pip
+```
+
+If the project contains a `requirements.txt` file, install the dependencies with:
+
+```bash
+pip install -r requirements.txt
+```
+
+Otherwise, install the required packages directly:
+
+```bash
+pip install numpy scipy matplotlib Pillow
+```
+
+To verify the installation:
+
+```bash
+python -c "import numpy, scipy, matplotlib, PIL; print('Dependencies installed successfully')"
+```
+
+When opening a new terminal later, reactivate the environment before running the project:
+
+```bash
+source .venv/bin/activate
+```
+
+---
+
 ## Running the Analysis
 
 ### Run on a directory
